@@ -1,5 +1,6 @@
 export interface MetsaEraldis {
 	id: string;
+    geometry?: any; // Lisatud: WFS päringu geomeetria (tavaliselt MultiPolygon)
 	properties: {
 		katastritunnus: string;
 		eraldis: string;
