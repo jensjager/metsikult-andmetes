@@ -42,7 +42,6 @@ export default function Step2Overview() {
 		return { cx: Math.round(cx), cy: Math.round(cy) };
 	}, []);
 
-	// Pärib reaalsed satelliitandmed kõigi eraldiste jaoks paralleelselt
 	const fetchRealSatelliteData = useCallback(async (details: any[]) => {
 		const withGeom = details.filter(d => d.geometry);
 		if (withGeom.length === 0) return;
@@ -94,6 +93,12 @@ export default function Step2Overview() {
 			setSatLoading(false);
 		}
 	}, [computeCentroid]);
+
+	React.useEffect(() => {
+		if (data?.details && Object.keys(realSatData).length === 0 && !satLoading) {
+			fetchRealSatelliteData(data.details);
+		}
+	}, [data?.details, realSatData, satLoading, fetchRealSatelliteData]);
 
 	if (!data) return null;
 
@@ -174,18 +179,16 @@ export default function Step2Overview() {
 		}
 		
 		// ESTHub Sentinel-2 reaalsed satelliitkaardid — kasutame leitud pilvitut kuupäeva kui võimalik
-		// Fallback: tänane kuupäev (wms-satiladu puudub LAYERS param → viga)
-		const todayDate = new Date().toISOString().split('T')[0];
-		const satDate = satCloudFreeDate ?? todayDate;
+		const dateParam = satCloudFreeDate ? `date=${satCloudFreeDate}&` : '';
 		
 		if (mapLayer === "NDVI") {
-			return `https://teenus.maaamet.ee/ows/wms-sentinel-2-ndvi?date=${satDate}&service=WMS&version=1.1.1&request=GetMap&layers=sentinel_2_ndvi&styles=&bbox=${bboxStr}&width=1000&height=600&srs=EPSG:3301&format=image/jpeg`;
+			return `https://teenus.maaamet.ee/ows/wms-sentinel-2-ndvi?${dateParam}service=WMS&version=1.1.1&request=GetMap&layers=sentinel_2_ndvi&styles=&bbox=${bboxStr}&width=1000&height=600&srs=EPSG:3301&format=image/jpeg`;
 		}
 		if (mapLayer === "NRG") {
-			return `https://teenus.maaamet.ee/ows/wms-sentinel-2-nrg?date=${satDate}&service=WMS&version=1.1.1&request=GetMap&layers=sentinel_2_nrg&styles=&bbox=${bboxStr}&width=1000&height=600&srs=EPSG:3301&format=image/jpeg`;
+			return `https://teenus.maaamet.ee/ows/wms-sentinel-2-nrg?${dateParam}service=WMS&version=1.1.1&request=GetMap&layers=sentinel_2_nrg&styles=&bbox=${bboxStr}&width=1000&height=600&srs=EPSG:3301&format=image/jpeg`;
 		}
 		if (mapLayer === "NDPI") {
-			return `https://teenus.maaamet.ee/ows/wms-sentinel-2-ndpi?date=${satDate}&service=WMS&version=1.1.1&request=GetMap&layers=sentinel_2_ndpi&styles=&bbox=${bboxStr}&width=1000&height=600&srs=EPSG:3301&format=image/jpeg`;
+			return `https://teenus.maaamet.ee/ows/wms-sentinel-2-ndpi?${dateParam}service=WMS&version=1.1.1&request=GetMap&layers=sentinel_2_ndpi&styles=&bbox=${bboxStr}&width=1000&height=600&srs=EPSG:3301&format=image/jpeg`;
 		}
 		
 		return "";
@@ -389,8 +392,8 @@ export default function Step2Overview() {
 						<span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mr-2 shrink-0">Kaardikiht</span>
 						<div className="flex items-center gap-1.5 flex-wrap">
 							{(["EESTIFOTO", "METSAFOTO", "DSM", "NDVI", "NRG", "NDPI"] as const).map((layer) => {
-								if (state.satelliteAuditPeriod === 'registry' && ["NDVI", "NRG", "NDPI"].includes(layer)) {
-									return null;
+								if (["NDVI", "NRG", "NDPI"].includes(layer) && Object.keys(realSatData).length === 0) {
+									return null; // Peida satelliitkihid kui andmeid pole veel laetud
 								}
 								return (
 									<button
@@ -414,84 +417,6 @@ export default function Step2Overview() {
 						</div>
 					</div>
 				)}
-
-				{/* ESTHub Satelliitseire Audit Dashboard */}
-				<div className="bg-slate-50 border border-slate-200 rounded-xl p-5 mb-8 flex flex-col md:flex-row md:items-center justify-between gap-6 relative overflow-hidden shadow-sm">
-					{(isUpdating || satLoading) && (
-						<div className="absolute inset-0 bg-white/70 backdrop-blur-sm z-50 flex items-center justify-center gap-2">
-							<Loader2 className="animate-spin text-emerald-600" size={24} />
-							<span className="text-sm font-semibold text-slate-700">
-								{satLoading ? "Pärin ESTHub satelliitandmeid..." : "Analüüsin satelliitandmeid..."}
-							</span>
-						</div>
-					)}
-
-					<div className="flex-1">
-						<div className="flex items-center gap-2 mb-2">
-							<ShieldCheck className={`w-5 h-5 ${state.satelliteAuditPeriod === 'active' ? 'text-emerald-600' : 'text-slate-400'}`} />
-							<span className="text-xs uppercase font-bold tracking-wider text-slate-400">ESTHub Taimkatte ja Raie Kontroll</span>
-						</div>
-						
-						<h3 className="text-xl font-bold text-slate-900 mb-2">
-							Seire režiim: <span className={state.satelliteAuditPeriod === 'active' ? 'text-emerald-700 font-extrabold' : 'text-slate-800 font-extrabold'}>
-								{state.satelliteAuditPeriod === 'active' ? 'Copernicus Sentinel-2' : 'Metsaregistri Arhiiv'}
-							</span>
-						</h3>
-						
-						<p className="text-slate-500 text-xs leading-relaxed max-w-xl">
-							{state.satelliteAuditPeriod === 'active' 
-								? "Satelliitkontroll analüüsib reaalajas Sentinel-2 vegetatsiooniindekseid. Kui metsa klorofülli peegeldus (NDVI) on kukkunud alla kriitilise piiri, tuvastatakse lageraie ja andmed korrigeeritakse tegeliku olukorra järgi."
-								: `Metsaregistri andmed põhinevad arhiivi takseerkirjeldusel. Kuna raied võivad toimuda kiiresti, soovitame alati aktiveerise satelliitseire audit.`
-							}
-						</p>
-						
-						{state.satelliteAuditPeriod === 'active' && data.avertedLoss && data.avertedLoss > 0 ? (
-							<div className="mt-3 bg-red-50 border border-red-100 text-red-800 px-3 py-2 rounded-lg flex items-center gap-2 text-xs font-bold w-fit animate-pulse">
-								<ShieldAlert size={14} className="text-red-500 shrink-0" />
-								<span>Tuvastatud lageraie! Säästetud kahju: {new Intl.NumberFormat("et-EE", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(data.avertedLoss)}</span>
-							</div>
-						) : state.satelliteAuditPeriod === 'active' ? (
-							<div className="mt-3 bg-emerald-50 border border-emerald-100 text-emerald-800 px-3 py-2 rounded-lg flex items-center gap-2 text-xs font-semibold w-fit">
-								<FileCheck size={14} className="text-emerald-500 shrink-0" />
-								<span>Kõik kontrollitud eraldised on heas seisukorras (taimkate on terve).</span>
-							</div>
-						) : null}
-						{/* Näita leitud cloud-free kuupäeva */}
-						{state.satelliteAuditPeriod === 'active' && satCloudFreeDate && !satLoading && (
-							<div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
-								<Calendar size={12} className="shrink-0" />
-								<span>
-									Viimane selge satelliitpilt:{" "}
-									<strong className="text-slate-700">
-										{new Date(satCloudFreeDate).toLocaleDateString("et-EE", { day: "numeric", month: "long", year: "numeric" })}
-									</strong>
-								</span>
-								{Object.values(realSatData).some(d => d?.stale) && (
-									<span className="px-1.5 py-0.5 text-[9px] font-black uppercase bg-amber-50 text-amber-700 border border-amber-200 rounded">Vanem kui 30 päeva</span>
-								)}
-							</div>
-						)}
-					</div>
-
-					<div className="flex flex-col gap-3 shrink-0">
-						<span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block mb-0.5 md:text-right">Vali ajaline vaade</span>
-						
-						<div className="flex bg-slate-200/60 p-1 rounded-xl border border-slate-200 w-fit">
-							<button
-								onClick={() => handleAuditPeriodChange('registry')}
-								className={`px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${state.satelliteAuditPeriod === 'registry' ? 'bg-white text-slate-800 shadow-sm border border-slate-200' : 'text-slate-500 hover:text-slate-700 bg-transparent'}`}
-							>
-								Registri alus
-							</button>
-							<button
-								onClick={() => handleAuditPeriodChange('active')}
-								className={`px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all flex items-center gap-1.5 ${state.satelliteAuditPeriod === 'active' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700 bg-transparent'}`}
-							>
-								<Activity size={14} /> ESTHub (2026)
-							</button>
-						</div>
-					</div>
-				</div>
 
 				<div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
 					<div className="bg-slate-50 rounded-xl p-5 border border-slate-200 shadow-sm flex flex-col">
@@ -552,7 +477,6 @@ export default function Step2Overview() {
 									<th className="py-3 px-4">Pindala</th>
 									<th className="py-3 px-4">Peapuuliik</th>
 									<th className="py-3 px-4">Vanus</th>
-									<th className="py-3 px-4">Seire Staatus</th>
 									<th className="py-3 px-4 w-12"></th>
 								</tr>
 							</thead>
@@ -597,25 +521,7 @@ export default function Step2Overview() {
 														)}
 													</div>
 												</td>
-												<td className="py-3 px-4">
-													{period === 'registry' || !audit ? (
-														<span className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-full bg-slate-100 text-slate-500 border border-slate-200">
-															Kontrollimata
-														</span>
-													) : audit.status === 'HEALTHY' ? (
-														<span className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1 w-fit">
-															<ShieldCheck size={11} className="shrink-0" /> Terve mets
-														</span>
-													) : audit.status === 'THINNED' ? (
-														<span className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-full bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1 w-fit">
-															<Eye size={11} className="shrink-0" /> Osaline raie
-														</span>
-													) : (
-														<span className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-full bg-red-50 text-red-700 border border-red-200 flex items-center gap-1 w-fit">
-															<ShieldAlert size={11} className="shrink-0" /> Lageraie
-														</span>
-													)}
-												</td>
+
 
 												<td className="py-3 px-4 text-slate-400 text-center">
 													{isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
@@ -624,42 +530,45 @@ export default function Step2Overview() {
 											{isExpanded && (
 												<tr className="bg-slate-50 border-b border-slate-200">
 													<td colSpan={6} className="p-0">
-														<div className="p-4 md:p-6 text-slate-700 animate-in fade-in slide-in-from-top-2 duration-200 border-t border-slate-100">
+														<div className="p-4 md:p-6 text-slate-700 animate-in fade-in slide-in-from-top-2 duration-200 border-t border-slate-100 flex flex-col gap-6">
+															
+															{/* ÜLEMINE RIDA: Oluline info (3 veergu) */}
 															<div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+																{/* 1. Põhiandmed */}
 																<div>
 																	<h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-2">
-																		<Info size={14} /> Üldandmed
+																		<Info size={14} /> Põhiandmed
 																	</h4>
-																	<ul className="space-y-2 text-sm">
-																		<li className="flex justify-between border-b border-slate-200 pb-1">
+																	<ul className="space-y-2 text-sm bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+																		<li className="flex justify-between border-b border-slate-100 pb-1.5">
 																			<span className="text-slate-500">Arenguklass</span>
-																			<span className="font-medium text-slate-900">{m.arengukl_kood || "-"}</span>
+																			<span className="font-medium text-slate-900">{m.arengukl_kood || m.arenguklass || "-"}</span>
 																		</li>
-																		<li className="flex justify-between border-b border-slate-200 pb-1">
+																		<li className="flex justify-between border-b border-slate-100 pb-1.5">
 																			<span className="text-slate-500">Boniteet</span>
-																			<span className="font-medium text-slate-900">{m.boniteedi_kood || "-"}</span>
+																			<span className="font-medium text-slate-900">{m.boniteedi_kood || m.boniteet || "-"}</span>
 																		</li>
-																		<li className="flex justify-between border-b border-slate-200 pb-1">
+																		<li className="flex justify-between border-b border-slate-100 pb-1.5">
 																			<span className="text-slate-500">Kasvukohatüüp</span>
-																			<span className="font-medium text-slate-900">{m.kasvukoht_kood || "-"}</span>
+																			<span className="font-medium text-slate-900">{m.kasvukoht_kood || m.kasvukoht || "-"}</span>
 																		</li>
-																		<li className="flex justify-between border-b border-slate-200 pb-1">
+																		<li className="flex justify-between border-b border-slate-100 pb-1.5">
 																			<span className="text-slate-500">Keskmine kõrgus</span>
 																			<span className="font-medium text-slate-900">{m.korgus ? `${m.korgus} m` : "-"}</span>
 																		</li>
-																		<li className="flex justify-between border-b border-slate-200 pb-1">
+																		<li className="flex justify-between border-b border-slate-100 pb-1.5">
 																			<span className="text-slate-500">Tagavara</span>
-																			<span className="font-medium text-slate-900">{m.tagavara_y_ha ? `${m.tagavara_y_ha} tm/ha` : "-"}</span>
+																			<span className="font-medium text-slate-900">{m.tagavara_y_ha || m.tagavara_1_ha ? `${m.tagavara_y_ha || m.tagavara_1_ha} tm/ha` : "-"}</span>
 																		</li>
-																		<li className="flex justify-between border-b border-slate-200 pb-1">
+																		<li className="flex justify-between border-b border-slate-100 pb-1.5">
 																			<span className="text-slate-500">Minimaalne raievanus</span>
 																			<span className={`font-semibold ${statusInfo.viga ? "text-rose-600" : "text-slate-800"}`}>
-																				{statusInfo.viga ? "Määramata (Puudub registris)" : `${statusInfo.raievanus} a`}
+																				{statusInfo.viga ? "Määramata" : `${statusInfo.raievanus} a`}
 																			</span>
 																		</li>
 																		<li className="flex justify-between pt-1">
 																			<span className="text-slate-500">Raie lubatavus</span>
-																			<span className={`font-bold text-[10px] uppercase tracking-wide px-2.5 py-0.5 rounded-full ${
+																			<span className={`font-bold text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full ${
 																				statusInfo.lubatud 
 																					? "bg-emerald-50 text-emerald-700 border border-emerald-200" 
 																					: statusInfo.viga 
@@ -672,7 +581,7 @@ export default function Step2Overview() {
 																	</ul>
 																</div>
 
-																{/* Sortimendid if available */}
+																{/* 2. Sortimendid või Arvutuse info */}
 																{detail.sortimendid && Object.keys(detail.sortimendid).length > 0 ? (
 																	<div>
 																		<h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-2">
@@ -681,22 +590,22 @@ export default function Step2Overview() {
 																		<div className="space-y-3">
 																			{Object.entries(detail.sortimendid).map(
 																				([liik, sort]: [string, any]) => (
-																					<div key={liik} className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
+																					<div key={liik} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
 																						<div className="flex justify-between font-bold text-sm mb-2 border-b border-slate-100 pb-1">
 																							<span className="text-slate-800">Puuliik: {liik}</span>
 																						</div>
 																						<div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
 																							<div className="flex justify-between">
-																								<span>Palk:</span> <span>{sort.palk?.toFixed(1)} tm</span>
+																								<span>Palk:</span> <span className="font-medium text-slate-900">{sort.palk?.toFixed(1)} tm</span>
 																							</div>
 																							<div className="flex justify-between">
-																								<span>Peenpalk:</span> <span>{sort.peenpalk?.toFixed(1)} tm</span>
+																								<span>Peenpalk:</span> <span className="font-medium text-slate-900">{sort.peenpalk?.toFixed(1)} tm</span>
 																							</div>
 																							<div className="flex justify-between">
-																								<span>Paber:</span> <span>{sort.paberipuit?.toFixed(1)} tm</span>
+																								<span>Paber:</span> <span className="font-medium text-slate-900">{sort.paberipuit?.toFixed(1)} tm</span>
 																							</div>
 																							<div className="flex justify-between">
-																								<span>Küte:</span> <span>{sort.kuttepuit?.toFixed(1)} tm</span>
+																								<span>Küte:</span> <span className="font-medium text-slate-900">{sort.kuttepuit?.toFixed(1)} tm</span>
 																							</div>
 																						</div>
 																					</div>
@@ -709,119 +618,103 @@ export default function Step2Overview() {
 																		<h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-2">
 																			<Info size={14} /> Arvutuse info
 																		</h4>
-																		<p className="text-sm bg-white p-3 rounded-lg border border-slate-200 text-slate-600">
+																		<p className="text-sm bg-white p-4 rounded-xl border border-slate-200 shadow-sm text-slate-600 leading-relaxed">
 																			{detail.note || "Detailsed sortimendid puuduvad."}
 																		</p>
 																	</div>
 																)}
 
-																{/* ESTHub Sentinel-2 Seire details */}
-																{audit && (
-																	<div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col gap-3">
-																		<h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1 flex items-center gap-2">
-																			<Activity size={14} /> ESTHub Sentinel-2 Seire
-																		</h4>
-																		
-																		<ul className="space-y-2 text-xs">
-																			<li className="flex justify-between border-b border-slate-200 pb-1">
-																				<span className="text-slate-500">Mõõdetud NDVI</span>
-																				<span className={`font-mono font-bold ${audit.status === 'CLEARCUT' ? 'text-red-600' : audit.status === 'THINNED' ? 'text-amber-600' : 'text-emerald-700'}`}>
-																					{audit.ndviActual.toFixed(2)} / {audit.ndviExpected.toFixed(2)} {period === 'active' ? '(Tegelik)' : ''}
-																				</span>
-																			</li>
-																			<li className="flex justify-between border-b border-slate-200 pb-1">
-																				<span className="text-slate-500">Pinnase niiskus (NDPI)</span>
-																				<span className="font-mono font-semibold text-slate-800">
-																					{audit.ndpiActual.toFixed(2)} {audit.status === 'CLEARCUT' ? '(Kõrge)' : '(Normalne)'}
-																				</span>
-																			</li>
-																			<li className="flex justify-between border-b border-slate-200 pb-1">
-																				<span className="text-slate-500">Raie tõenäosus</span>
-																				<span className="font-semibold text-slate-900">{audit.clearcutProbability}%</span>
-																			</li>
-																			<li className="flex justify-between border-b border-slate-200 pb-1">
-																				<span className="text-slate-500">Viimane seire kuupäev</span>
-																				<span className="font-medium text-slate-900">{audit.auditDate}</span>
-																			</li>
-																			<li className="flex justify-between border-b border-slate-200 pb-1">
-																				<span className="text-slate-500">Metsa tagatisväärtus</span>
-																				<span className="font-bold text-slate-900 font-mono">
-																					{new Intl.NumberFormat("et-EE", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(period === 'active' ? audit.adjustedValue : audit.originalValue)}
-																				</span>
-																				{period === 'active' && audit.status !== 'HEALTHY' && (
-																					<div className="bg-white p-2.5 rounded-lg border border-slate-200 flex flex-col gap-1 shadow-sm mt-1">
-																						<span className="text-[9px] font-black uppercase tracking-wide text-amber-600">Auditiparandus</span>
-																						<p className="text-[10px] text-slate-600 leading-relaxed">
-																							{audit.status === 'CLEARCUT' 
-																								? `Klorofülli taseme järsu languse tõttu (NDVI: ${audit.ndviActual.toFixed(2)}) tuvastas satelliit lageraiet. Puidu väärtus vähendati nulliks.` 
-																								: `Vedeldatud taimkatte tõttu on puidu mahtu korrigeeritud -40% (harvendusraie).`
-																							}
-																						</p>
+																{/* 3. ESTHub REAALSED Mõõtmised */}
+																{(() => {
+																	const realData = realSatData[detail.eraldisId];
+																	if (!realData || realData.error === 'NO_DATA') return (
+																		<div>
+																			<h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-2">
+																				<Satellite size={14} /> ESTHub Satelliitseire
+																			</h4>
+																			<p className="text-sm bg-slate-100 p-4 rounded-xl border border-slate-200 text-slate-500 italic">
+																				{satLoading ? "Andmeid laetakse..." : "Satelliitandmed puuduvad."}
+																			</p>
+																		</div>
+																	);
+																	
+																	return (
+																		<div>
+																			<h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-2">
+																				<Satellite size={14} /> ESTHub Satelliitseire
+																			</h4>
+																			<div className={`p-4 rounded-xl border shadow-sm flex flex-col gap-3 ${
+																				realData.status === 'CLEARCUT' ? 'bg-red-50 border-red-200' :
+																				realData.status === 'THINNED' ? 'bg-amber-50 border-amber-200' :
+																				'bg-emerald-50 border-emerald-200'
+																			}`}>
+																				<div className="flex items-center justify-between mb-1">
+																					<div className="flex items-center gap-1.5">
+																						<span className={`px-2 py-1 text-[10px] font-black uppercase tracking-wider rounded-lg border ${
+																							realData.status === 'CLEARCUT' ? 'bg-red-100 text-red-700 border-red-300' :
+																							realData.status === 'THINNED' ? 'bg-amber-100 text-amber-700 border-amber-300' :
+																							'bg-emerald-100 text-emerald-700 border-emerald-300'
+																						}`}>
+																							{realData.status === 'CLEARCUT' ? '⚠ Lageraie oht' :
+																							realData.status === 'THINNED' ? '~ Osaline raie' :
+																							'✓ Terve mets'}
+																						</span>
+																						{realData.stale && (
+																							<span className="px-1.5 py-1 text-[9px] font-black uppercase bg-amber-100 text-amber-700 border border-amber-300 rounded-lg">Vana pilt</span>
+																						)}
 																					</div>
-																				)}
-																			</li>
-																		</ul>
-																		
-																		{/* ESTHub REAALSED Mõõtmised (GetFeatureInfo) */}
-																		{(() => {
-																			const realData = realSatData[detail.eraldisId];
-																			if (!realData || realData.error === 'NO_DATA') return null;
-																			return (
-																				<div className={`p-4 rounded-xl border flex flex-col gap-3 ${
-																					realData.status === 'CLEARCUT' ? 'bg-red-50 border-red-200' :
-																					realData.status === 'THINNED' ? 'bg-amber-50 border-amber-200' :
-																					'bg-emerald-50 border-emerald-200'
-																				}`}>
-																					<div className="flex items-center justify-between">
-																						<h4 className="text-xs font-bold uppercase tracking-wider flex items-center gap-2 text-slate-600">
-																							<Satellite size={14} /> ESTHub — Reaalne mõõtmine
-																						</h4>
-																						<div className="flex items-center gap-1.5">
-																							<span className={`px-2 py-0.5 text-[9px] font-black uppercase tracking-wider rounded-full border ${
-																								realData.status === 'CLEARCUT' ? 'bg-red-100 text-red-700 border-red-300' :
-																								realData.status === 'THINNED' ? 'bg-amber-100 text-amber-700 border-amber-300' :
-																								'bg-emerald-100 text-emerald-700 border-emerald-300'
-																							}`}>
-																								{realData.status === 'CLEARCUT' ? '⚠ Lageraie' :
-																								 realData.status === 'THINNED' ? '~ Osaline raie' :
-																								 '✓ Terve mets'}
-																							</span>
-																							{realData.stale && (
-																								<span className="px-1.5 py-0.5 text-[8px] font-black uppercase bg-amber-100 text-amber-700 border border-amber-300 rounded">Vana pilt</span>
-																							)}
-																						</div>
-																					</div>
-																					<ul className="space-y-1.5 text-xs">
-																						<li className="flex justify-between border-b border-black/10 pb-1">
-																							<span className="text-slate-600">Mõõdetud NDVI</span>
-																							<span className={`font-mono font-bold ${
-																								realData.status === 'CLEARCUT' ? 'text-red-700' :
-																								realData.status === 'THINNED' ? 'text-amber-700' : 'text-emerald-700'
-																							}`}>
-																								{realData.ndvi?.toFixed(3) ?? 'N/A'}
-																							</span>
-																						</li>
-																						<li className="flex justify-between border-b border-black/10 pb-1">
-																							<span className="text-slate-600">Mõõdetud NDPI</span>
-																							<span className="font-mono font-semibold text-slate-700">{realData.ndpi?.toFixed(3) ?? 'N/A'}</span>
-																						</li>
-																						<li className="flex justify-between pt-0.5">
-																							<span className="text-slate-600">Satelliitpildi kuupäev</span>
-																							<span className="font-medium text-slate-800">
-																								{realData.date ? new Date(realData.date).toLocaleDateString("et-EE", { day: "numeric", month: "long", year: "numeric" }) : '-'}
-																								{!realData.cloudfree && <span className="ml-1 text-amber-600">(lähim)</span>}
-																							</span>
-																						</li>
-																					</ul>
-																					{realData.warning && (
-																						<p className="text-[10px] text-amber-700 bg-amber-100 px-2 py-1.5 rounded border border-amber-200">{realData.warning}</p>
-																					)}
 																				</div>
-																			);
-																		})()}
-																	</div>
-																)}
+																				<ul className="space-y-2 text-xs">
+																					<li className="flex justify-between border-b border-black/5 pb-1.5">
+																						<span className="text-slate-600 font-medium">Taimkate (NDVI)</span>
+																						<span className={`font-mono font-bold ${
+																							realData.status === 'CLEARCUT' ? 'text-red-700' :
+																							realData.status === 'THINNED' ? 'text-amber-700' : 'text-emerald-700'
+																						}`}>
+																							{realData.ndvi?.toFixed(3) ?? 'N/A'}
+																						</span>
+																					</li>
+																					<li className="flex justify-between border-b border-black/5 pb-1.5">
+																						<span className="text-slate-600 font-medium">Pinnase niiskus (NDPI)</span>
+																						<span className="font-mono font-bold text-slate-700">{realData.ndpi?.toFixed(3) ?? 'N/A'}</span>
+																					</li>
+																					<li className="flex justify-between pt-0.5">
+																						<span className="text-slate-600 font-medium">Pildi kuupäev</span>
+																						<span className="font-bold text-slate-800">
+																							{realData.date ? new Date(realData.date).toLocaleDateString("et-EE", { day: "numeric", month: "long", year: "numeric" }) : '-'}
+																							{!realData.cloudfree && <span className="ml-1 text-amber-600 text-[10px] font-normal">(lähim)</span>}
+																						</span>
+																					</li>
+																				</ul>
+																				{realData.warning && (
+																					<p className="text-[10px] text-amber-800 bg-amber-100/50 px-2.5 py-2 rounded-lg border border-amber-200/50 leading-relaxed font-medium mt-1">{realData.warning}</p>
+																				)}
+																			</div>
+																		</div>
+																	);
+																})()}
 															</div>
+															
+															{/* ALUMINE RIDA: Kõik detailsed registriandmed */}
+															<div className="mt-2">
+																<h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-2 border-t border-slate-200 pt-6">
+																	<Layers size={14} /> Kõik registri andmed ({Object.keys(m).filter(k => typeof m[k] !== 'object' && m[k] !== null && m[k] !== '').length})
+																</h4>
+																<div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+																	<div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-3">
+																		{Object.entries(m)
+																			.filter(([key, value]) => value !== null && value !== '' && typeof value !== 'object')
+																			.sort(([a], [b]) => a.localeCompare(b))
+																			.map(([key, value]) => (
+																			<div key={key} className="flex flex-col border-b border-slate-100 pb-1.5">
+																				<span className="text-[10px] uppercase font-bold text-slate-400 mb-0.5">{key.replace(/_/g, ' ')}</span>
+																				<span className="text-sm font-medium text-slate-800 truncate" title={String(value)}>{String(value)}</span>
+																			</div>
+																		))}
+																	</div>
+																</div>
+															</div>
+
 														</div>
 													</td>
 												</tr>

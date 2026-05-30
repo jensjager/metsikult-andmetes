@@ -109,7 +109,8 @@ export async function fetchSatelliteAuditClient(cx: number, cy: number, forcedDa
   if (forcedDate) {
     ndvi = await fetchFeatureInfo(WMS_NDVI_BASE, NDVI_LAYER, forcedDate, cx, cy);
   } else {
-    for (let i = 0; i <= MAX_SEARCH_DAYS; i++) {
+    const searchDays = [0, 5, 10, 15, 20, 30, 45, 60, 90, 120];
+    for (const i of searchDays) {
       const date = dateString(i);
       const value = await fetchFeatureInfo(WMS_NDVI_BASE, NDVI_LAYER, date, cx, cy);
       if (value !== null) {

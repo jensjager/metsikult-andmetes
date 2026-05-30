@@ -50,7 +50,7 @@ const defaultState: CalculatorState = {
   selectedEraldised: [],
   storageLocation: null,
   costs: null,
-  satelliteAuditPeriod: 'active', // default is 'active' to run satellite check immediately
+  satelliteAuditPeriod: 'registry', // default is 'registry' to avoid mock changes, user requested lowkey UI instead
 };
 
 const CalculatorContext = createContext<CalculatorContextType | undefined>(undefined);
