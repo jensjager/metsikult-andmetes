@@ -1,16 +1,163 @@
 "use client";
 
 import { useCalculator } from "@/lib/CalculatorContext";
-import { ArrowRight, ArrowLeft, Map, TrendingUp, MapPin, ChevronDown, ChevronUp, Info, Layers } from "lucide-react";
-import React, { useState } from "react";
+import { ArrowRight, ArrowLeft, Map, TrendingUp, MapPin, ChevronDown, ChevronUp, Info, Layers, ShieldCheck, ShieldAlert, Eye, Activity, Droplets, Loader2, Calendar, FileCheck, Satellite } from "lucide-react";
+import React, { useState, useCallback } from "react";
+
+interface RealSatResult {
+	date: string | null;
+	cloudfree: boolean;
+	ndvi: number | null;
+	ndpi: number | null;
+	status: 'HEALTHY' | 'THINNED' | 'CLEARCUT' | 'UNKNOWN';
+	stale: boolean;
+	warning: string | null;
+	error: string | null;
+}
 
 export default function Step2Overview() {
-	const { state, nextStep, prevStep } = useCalculator();
+	const { state, nextStep, prevStep, setSatelliteAuditPeriod, setApiData, setXmlData } = useCalculator();
 	const data = state.apiData || state.xmlData;
 	const [expandedEraldis, setExpandedEraldis] = useState<string | null>(null);
-	const [mapLayer, setMapLayer] = useState<"EESTIFOTO" | "METSAFOTO" | "DSM">("EESTIFOTO");
+	const [mapLayer, setMapLayer] = useState<"EESTIFOTO" | "METSAFOTO" | "DSM" | "NDVI" | "NRG" | "NDPI">("EESTIFOTO");
+	const [isUpdating, setIsUpdating] = useState(false);
+	const [realSatData, setRealSatData] = useState<Record<string, RealSatResult | null>>({});
+	const [satLoading, setSatLoading] = useState(false);
+	const [satCloudFreeDate, setSatCloudFreeDate] = useState<string | null>(null);
+
+	// Arvutab eraldise geomeetria (Polygon/MultiPolygon) tsentripunkti LEST koordinaatides
+	const computeCentroid = useCallback((geometry: any): { cx: number; cy: number } | null => {
+		if (!geometry?.coordinates) return null;
+		let ring: number[][];
+		if (geometry.type === 'Polygon') {
+			ring = geometry.coordinates[0];
+		} else if (geometry.type === 'MultiPolygon') {
+			ring = geometry.coordinates[0]?.[0];
+		} else {
+			return null;
+		}
+		if (!ring?.length) return null;
+		const cx = ring.reduce((s: number, p: number[]) => s + p[0], 0) / ring.length;
+		const cy = ring.reduce((s: number, p: number[]) => s + p[1], 0) / ring.length;
+		return { cx: Math.round(cx), cy: Math.round(cy) };
+	}, []);
+
+	// Pärib reaalsed satelliitandmed kõigi eraldiste jaoks paralleelselt
+	const fetchRealSatelliteData = useCallback(async (details: any[]) => {
+		const withGeom = details.filter(d => d.geometry);
+		if (withGeom.length === 0) return;
+
+		setSatLoading(true);
+		const results: Record<string, RealSatResult | null> = {};
+
+		try {
+			// 1. Leia pilvitu kuupäev esimese eraldise tsentripunkti põhjal
+			const firstCentroid = computeCentroid(withGeom[0].geometry);
+			if (!firstCentroid) {
+				setSatLoading(false);
+				return;
+			}
+
+			const { fetchSatelliteAuditClient } = await import("@/lib/client-api");
+			const firstData = await fetchSatelliteAuditClient(firstCentroid.cx, firstCentroid.cy);
+			results[withGeom[0].eraldisId] = firstData;
+
+			const cloudFreeDate = firstData.date;
+			if (cloudFreeDate) {
+				setSatCloudFreeDate(cloudFreeDate);
+			}
+
+			// 2. Ülejäänud eraldised paralleelselt, kasutades sama leitud kuupäeva
+			if (withGeom.length > 1) {
+				const restPromises = withGeom.slice(1).map(async (detail) => {
+					const centroid = computeCentroid(detail.geometry);
+					if (!centroid) return { id: detail.eraldisId, data: null };
+
+					try {
+						const satData = await fetchSatelliteAuditClient(centroid.cx, centroid.cy, cloudFreeDate);
+						return { id: detail.eraldisId, data: satData };
+					} catch {
+						return { id: detail.eraldisId, data: null };
+					}
+				});
+
+				const restResults = await Promise.all(restPromises);
+				for (const { id, data } of restResults) {
+					results[id] = data;
+				}
+			}
+
+		} catch (e) {
+			console.error('Satelliitandmete pärimine ebaõnnestus:', e);
+		} finally {
+			setRealSatData(results);
+			setSatLoading(false);
+		}
+	}, [computeCentroid]);
 
 	if (!data) return null;
+
+	const avgAge = (() => {
+		if (!data.details || data.details.length === 0) return 0;
+		let sumAge = 0;
+		let count = 0;
+		for (const d of data.details) {
+			const age = parseInt(d.meta?.keskm_vanus || d.meta?.vanus || "0", 10);
+			if (age > 0) {
+				sumAge += age;
+				count++;
+			}
+		}
+		return count > 0 ? Math.round(sumAge / count) : 0;
+	})();
+
+	const checkRaieStatus = (stand: any) => {
+		const m = stand.meta || {};
+		const arenguklass = (m.arengukl_kood || m.arenguklass || "").toLowerCase().trim();
+		const vanus = parseInt(m.keskm_vanus || m.vanus || "0", 10);
+		
+		// Fetch official raievanus directly from the API or XML
+		const raievanus = parseInt(m.raievanus || m.kk_raievanus || m.kkraievanus || m.kaalutud_raievanus || m.keskm_raievanus || m.keskmRaievanus || "0", 10);
+
+		if (raievanus <= 0) {
+			return {
+				lubatud: false,
+				viga: true,
+				pohjus: "VIGA: Metsaregistrist puudub ametlik raievanus!",
+				raievanus: 0,
+				vanus
+			};
+		}
+
+		const isKups = arenguklass.includes("küps") || arenguklass.includes("kups") || arenguklass === "kü" || arenguklass === "ku";
+
+		if (isKups) {
+			return {
+				lubatud: true,
+				pohjus: "LUBATUD (Küps mets)",
+				raievanus,
+				vanus
+			};
+		}
+
+		if (vanus >= raievanus) {
+			return {
+				lubatud: true,
+				pohjus: `LUBATUD (Vanus ${vanus} a >= raievanus ${raievanus} a)`,
+				raievanus,
+				vanus
+			};
+		}
+
+		return {
+			lubatud: false,
+			pohjus: `EI (Raievanus ${raievanus} a, praegu ${vanus} a)`,
+			raievanus,
+			vanus
+		};
+	};
+
+	const hasFellingAgeError = data.details?.some((detail: any) => checkRaieStatus(detail).viga) || false;
 
 	const getBaseMapUrl = () => {
 		if (!data.bbox) return "";
@@ -25,7 +172,107 @@ export default function Step2Overview() {
 		if (mapLayer === "DSM") {
 			return `https://kaart.maaamet.ee/wms/fotokaart?service=WMS&version=1.1.1&request=GetMap&layers=nDSM&styles=&bbox=${bboxStr}&width=1000&height=600&srs=EPSG:3301&format=image/jpeg`;
 		}
+		
+		// ESTHub Sentinel-2 reaalsed satelliitkaardid — kasutame leitud pilvitut kuupäeva kui võimalik
+		// Fallback: tänane kuupäev (wms-satiladu puudub LAYERS param → viga)
+		const todayDate = new Date().toISOString().split('T')[0];
+		const satDate = satCloudFreeDate ?? todayDate;
+		
+		if (mapLayer === "NDVI") {
+			return `https://teenus.maaamet.ee/ows/wms-sentinel-2-ndvi?date=${satDate}&service=WMS&version=1.1.1&request=GetMap&layers=sentinel_2_ndvi&styles=&bbox=${bboxStr}&width=1000&height=600&srs=EPSG:3301&format=image/jpeg`;
+		}
+		if (mapLayer === "NRG") {
+			return `https://teenus.maaamet.ee/ows/wms-sentinel-2-nrg?date=${satDate}&service=WMS&version=1.1.1&request=GetMap&layers=sentinel_2_nrg&styles=&bbox=${bboxStr}&width=1000&height=600&srs=EPSG:3301&format=image/jpeg`;
+		}
+		if (mapLayer === "NDPI") {
+			return `https://teenus.maaamet.ee/ows/wms-sentinel-2-ndpi?date=${satDate}&service=WMS&version=1.1.1&request=GetMap&layers=sentinel_2_ndpi&styles=&bbox=${bboxStr}&width=1000&height=600&srs=EPSG:3301&format=image/jpeg`;
+		}
+		
 		return "";
+	};
+
+	const getPolygonStyle = (stand: any) => {
+		const audit = stand.satelliteAudit;
+		const period = state.satelliteAuditPeriod;
+		const statusInfo = checkRaieStatus(stand);
+		
+		if (period === 'registry' || !audit) {
+			if (!statusInfo.lubatud) {
+				return {
+					fill: "rgba(239, 68, 68, 0.08)",
+					stroke: "#ef4444",
+					strokeWidth: "2",
+					strokeDasharray: "4 4"
+				};
+			}
+			return {
+				fill: "rgba(16, 185, 129, 0.12)",
+				stroke: "#10b981",
+				strokeWidth: "2",
+				strokeDasharray: "none"
+			};
+		}
+		
+		// Kuna NDVI, NRG ja NDPI aluskaardid on juba reaalne satelliidi pilt, kuvame vector-piire õrna värviga, et taust oleks nähtav!
+		if (mapLayer === "NDVI" || mapLayer === "NRG" || mapLayer === "NDPI") {
+			const strokeColors: Record<string, string> = {
+				HEALTHY: "#10b981",
+				THINNED: "#f59e0b",
+				CLEARCUT: "#ef4444"
+			};
+			const stroke = strokeColors[audit.status] || "#10b981";
+			return {
+				fill: "rgba(255, 255, 255, 0.05)", // läbipaistev täide, et satellite raster paistaks läbi
+				stroke: stroke,
+				strokeWidth: "2.5",
+				strokeDasharray: statusInfo.lubatud ? "none" : "3 3"
+			};
+		}
+		
+		const colors: Record<string, { stroke: string; fill: string }> = {
+			HEALTHY: { stroke: "#10b981", fill: "rgba(16, 185, 129, 0.08)" },
+			THINNED: { stroke: "#f59e0b", fill: "rgba(245, 158, 11, 0.08)" },
+			CLEARCUT: { stroke: "#ef4444", fill: "rgba(239, 68, 68, 0.08)" }
+		};
+		
+		const col = colors[audit.status] || colors.HEALTHY;
+		return {
+			fill: col.fill,
+			stroke: col.stroke,
+			strokeWidth: "2.5",
+			strokeDasharray: statusInfo.lubatud ? "none" : "4 4"
+		};
+	};
+
+	const handleAuditPeriodChange = async (period: 'registry' | 'active') => {
+		setSatelliteAuditPeriod(period);
+		setIsUpdating(true);
+		
+		try {
+			const reqKat = state.katastritunnus || data.katastritunnus;
+			if (reqKat && reqKat !== "XML-Fail") {
+				const { calculateForestValueClient } = await import("@/lib/client-api");
+				const parsed = await calculateForestValueClient(reqKat, period);
+				if (state.xmlData) {
+					setXmlData(parsed);
+				} else {
+					setApiData(parsed);
+				}
+			}
+		} catch (e) {
+			console.error("Failed to update audit period", e);
+		} finally {
+			setIsUpdating(false);
+		}
+
+		// ESTHub aktiveerides pärime reaalsed satelliitandmed eraldiste tsentripunktide jaoks
+		if (period === 'active' && data.details) {
+			await fetchRealSatelliteData(data.details);
+		}
+		if (period === 'registry') {
+			setRealSatData({});
+			setSatCloudFreeDate(null);
+		}
 	};
 
 	return (
@@ -40,6 +287,18 @@ export default function Step2Overview() {
 					</span>
 				</div>
 
+				{hasFellingAgeError && (
+					<div className="bg-rose-50 border border-rose-200 text-rose-800 p-4 rounded-xl mb-6 flex items-start gap-3 shadow-sm animate-in fade-in duration-200">
+						<ShieldAlert size={20} className="text-rose-500 shrink-0 mt-0.5" />
+						<div className="flex-1 text-sm">
+							<p className="font-bold">Kriitiline viga andmetes!</p>
+							<p className="mt-1 text-rose-700 leading-relaxed">
+								Mõnel metsaeraldisel puudub Metsaregistri andmetes ametlik raievanus. Kuna vaikeväärtuste kasutamine pole lubatud, on edasine arvutamine peatatud.
+							</p>
+						</div>
+					</div>
+				)}
+
 				{/* Kaart - WMS pilt või Placeholder */}
 				<div className="w-full h-64 md:h-80 bg-slate-100 rounded-xl rounded-b-none border border-slate-200 border-b-0 overflow-hidden relative flex flex-col items-center justify-center bg-[url('https://www.transparenttextures.com/patterns/cartographer.png')]">
 					{data.bbox ? (
@@ -53,12 +312,49 @@ export default function Step2Overview() {
 										alt="Metsatüki aluskaart"
 										className="absolute inset-0 w-full h-full object-cover"
 									/>
-									{/* Shape Boundary Overlay (WMS with CQL filter) */}
-									<img
-										src={`https://gsavalik.envir.ee/geoserver/metsaregister/ows?service=WMS&version=1.1.1&request=GetMap&layers=metsaregister:eraldis&styles=&bbox=${data.bbox[0]},${data.bbox[1]},${data.bbox[2]},${data.bbox[3]}&width=1000&height=600&srs=EPSG:3301&format=image/png&transparent=true&cql_filter=${encodeURIComponent(`katastri_nr='${state.katastritunnus}'`)}`}
-										alt="Metsatüki piirid"
-										className="absolute inset-0 w-full h-full object-cover opacity-100 drop-shadow-[0_0_4px_rgba(255,255,255,1)] drop-shadow-[0_0_8px_rgba(255,255,255,0.8)] mix-blend-normal"
-									/>
+									{/* Shape Boundary Overlay: SVG or WMS */}
+									{data.details && data.details.some((d: any) => d.geometry) ? (
+										<svg 
+											viewBox={`${data.bbox[0]} ${-data.bbox[3]} ${data.bbox[2] - data.bbox[0]} ${data.bbox[3] - data.bbox[1]}`}
+											className="absolute inset-0 w-full h-full pointer-events-none z-10"
+										>
+											{data.details.map((stand: any) => {
+												if (!stand.geometry || !stand.geometry.coordinates) return null;
+												const rings = stand.geometry.type === "Polygon"
+													? stand.geometry.coordinates
+													: stand.geometry.coordinates[0];
+												const dStr = rings.map((ring: any) => {
+													return "M " + ring.map(([x, y]: number[]) => `${x} ${-y}`).join(" L ") + " Z";
+												}).join(" ");
+
+												const style = getPolygonStyle(stand);
+												return (
+													<path
+														key={stand.eraldisId}
+														d={dStr}
+														fillRule="evenodd"
+														fill={style.fill}
+														stroke={style.stroke}
+														strokeWidth={style.strokeWidth}
+														strokeDasharray={style.strokeDasharray}
+														className="drop-shadow-[0_0_3px_rgba(0,0,0,0.5)]"
+														vectorEffect="non-scaling-stroke"
+													/>
+												);
+											})}
+										</svg>
+									) : (
+										<img
+											src={`https://gsavalik.envir.ee/geoserver/metsaregister/ows?service=WMS&version=1.1.1&request=GetMap&layers=metsaregister:eraldis&styles=&bbox=${data.bbox[0]},${data.bbox[1]},${data.bbox[2]},${data.bbox[3]}&width=1000&height=600&srs=EPSG:3301&format=image/png&transparent=true&cql_filter=${encodeURIComponent(`katastri_nr='${state.katastritunnus}'`)}`}
+											alt="Metsatüki piirid"
+											className="absolute inset-0 w-full h-full object-cover opacity-100 drop-shadow-[0_0_4px_rgba(255,255,255,1)] drop-shadow-[0_0_8px_rgba(255,255,255,0.8)] mix-blend-normal"
+										/>
+									)}
+
+									{/* Attribution indicator */}
+									<div className="absolute bottom-3 right-3 bg-white/95 backdrop-blur-sm px-2.5 py-1 rounded-lg border border-slate-200/60 shadow-sm text-slate-400 font-mono text-[9px] pointer-events-none select-none font-bold z-20">
+										Kaart: Maa- ja Ruumiamet 2026
+									</div>
 								</div>
 							</div>
 						</>
@@ -89,25 +385,113 @@ export default function Step2Overview() {
 
 				{/* Map Layer Switcher - outside the map */}
 				{data.bbox && (
-					<div className="w-full border border-slate-200 border-t-0 rounded-b-xl bg-slate-50 px-4 py-3 flex items-center gap-2 mb-8">
+					<div className="w-full border border-slate-200 border-t-0 rounded-b-xl bg-slate-50 px-4 py-3 flex items-center gap-2 mb-6">
 						<span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 mr-2 shrink-0">Kaardikiht</span>
 						<div className="flex items-center gap-1.5 flex-wrap">
-							{(["EESTIFOTO", "METSAFOTO", "DSM"] as const).map((layer) => (
-								<button
-									key={layer}
-									onClick={() => setMapLayer(layer)}
-									className={`px-4 py-1.5 text-[11px] uppercase font-bold tracking-wider rounded-lg transition-all duration-150 ${
-										mapLayer === layer
-											? "bg-emerald-600 text-white shadow-sm"
-											: "bg-white text-slate-600 border border-slate-200 hover:border-emerald-300 hover:text-emerald-700"
-									}`}
-								>
-									{layer === "EESTIFOTO" ? "Ortofoto" : layer === "METSAFOTO" ? "Metsanduslik ortofoto" : "Maakatte kõrgusmudel"}
-								</button>
-							))}
+							{(["EESTIFOTO", "METSAFOTO", "DSM", "NDVI", "NRG", "NDPI"] as const).map((layer) => {
+								if (state.satelliteAuditPeriod === 'registry' && ["NDVI", "NRG", "NDPI"].includes(layer)) {
+									return null;
+								}
+								return (
+									<button
+										key={layer}
+										onClick={() => setMapLayer(layer)}
+										className={`px-4 py-1.5 text-[11px] uppercase font-bold tracking-wider rounded-lg transition-all duration-150 ${
+											mapLayer === layer
+												? "bg-emerald-600 text-white shadow-sm"
+												: "bg-white text-slate-600 border border-slate-200 hover:border-emerald-300 hover:text-emerald-700"
+										}`}
+									>
+										{layer === "EESTIFOTO" ? "Ortofoto" 
+										 : layer === "METSAFOTO" ? "Metsanduslik ortofoto" 
+										 : layer === "DSM" ? "Kõrgusmudel"
+										 : layer === "NDVI" ? "Taimkatte indeks (NDVI)"
+										 : layer === "NRG" ? "Lähi-infrapuna (NRG)"
+										 : "Veekogud (NDPI)"}
+									</button>
+								);
+							})}
 						</div>
 					</div>
 				)}
+
+				{/* ESTHub Satelliitseire Audit Dashboard */}
+				<div className="bg-slate-50 border border-slate-200 rounded-xl p-5 mb-8 flex flex-col md:flex-row md:items-center justify-between gap-6 relative overflow-hidden shadow-sm">
+					{(isUpdating || satLoading) && (
+						<div className="absolute inset-0 bg-white/70 backdrop-blur-sm z-50 flex items-center justify-center gap-2">
+							<Loader2 className="animate-spin text-emerald-600" size={24} />
+							<span className="text-sm font-semibold text-slate-700">
+								{satLoading ? "Pärin ESTHub satelliitandmeid..." : "Analüüsin satelliitandmeid..."}
+							</span>
+						</div>
+					)}
+
+					<div className="flex-1">
+						<div className="flex items-center gap-2 mb-2">
+							<ShieldCheck className={`w-5 h-5 ${state.satelliteAuditPeriod === 'active' ? 'text-emerald-600' : 'text-slate-400'}`} />
+							<span className="text-xs uppercase font-bold tracking-wider text-slate-400">ESTHub Taimkatte ja Raie Kontroll</span>
+						</div>
+						
+						<h3 className="text-xl font-bold text-slate-900 mb-2">
+							Seire režiim: <span className={state.satelliteAuditPeriod === 'active' ? 'text-emerald-700 font-extrabold' : 'text-slate-800 font-extrabold'}>
+								{state.satelliteAuditPeriod === 'active' ? 'Copernicus Sentinel-2' : 'Metsaregistri Arhiiv'}
+							</span>
+						</h3>
+						
+						<p className="text-slate-500 text-xs leading-relaxed max-w-xl">
+							{state.satelliteAuditPeriod === 'active' 
+								? "Satelliitkontroll analüüsib reaalajas Sentinel-2 vegetatsiooniindekseid. Kui metsa klorofülli peegeldus (NDVI) on kukkunud alla kriitilise piiri, tuvastatakse lageraie ja andmed korrigeeritakse tegeliku olukorra järgi."
+								: `Metsaregistri andmed põhinevad arhiivi takseerkirjeldusel. Kuna raied võivad toimuda kiiresti, soovitame alati aktiveerise satelliitseire audit.`
+							}
+						</p>
+						
+						{state.satelliteAuditPeriod === 'active' && data.avertedLoss && data.avertedLoss > 0 ? (
+							<div className="mt-3 bg-red-50 border border-red-100 text-red-800 px-3 py-2 rounded-lg flex items-center gap-2 text-xs font-bold w-fit animate-pulse">
+								<ShieldAlert size={14} className="text-red-500 shrink-0" />
+								<span>Tuvastatud lageraie! Säästetud kahju: {new Intl.NumberFormat("et-EE", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(data.avertedLoss)}</span>
+							</div>
+						) : state.satelliteAuditPeriod === 'active' ? (
+							<div className="mt-3 bg-emerald-50 border border-emerald-100 text-emerald-800 px-3 py-2 rounded-lg flex items-center gap-2 text-xs font-semibold w-fit">
+								<FileCheck size={14} className="text-emerald-500 shrink-0" />
+								<span>Kõik kontrollitud eraldised on heas seisukorras (taimkate on terve).</span>
+							</div>
+						) : null}
+						{/* Näita leitud cloud-free kuupäeva */}
+						{state.satelliteAuditPeriod === 'active' && satCloudFreeDate && !satLoading && (
+							<div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
+								<Calendar size={12} className="shrink-0" />
+								<span>
+									Viimane selge satelliitpilt:{" "}
+									<strong className="text-slate-700">
+										{new Date(satCloudFreeDate).toLocaleDateString("et-EE", { day: "numeric", month: "long", year: "numeric" })}
+									</strong>
+								</span>
+								{Object.values(realSatData).some(d => d?.stale) && (
+									<span className="px-1.5 py-0.5 text-[9px] font-black uppercase bg-amber-50 text-amber-700 border border-amber-200 rounded">Vanem kui 30 päeva</span>
+								)}
+							</div>
+						)}
+					</div>
+
+					<div className="flex flex-col gap-3 shrink-0">
+						<span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block mb-0.5 md:text-right">Vali ajaline vaade</span>
+						
+						<div className="flex bg-slate-200/60 p-1 rounded-xl border border-slate-200 w-fit">
+							<button
+								onClick={() => handleAuditPeriodChange('registry')}
+								className={`px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${state.satelliteAuditPeriod === 'registry' ? 'bg-white text-slate-800 shadow-sm border border-slate-200' : 'text-slate-500 hover:text-slate-700 bg-transparent'}`}
+							>
+								Registri alus
+							</button>
+							<button
+								onClick={() => handleAuditPeriodChange('active')}
+								className={`px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all flex items-center gap-1.5 ${state.satelliteAuditPeriod === 'active' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700 bg-transparent'}`}
+							>
+								<Activity size={14} /> ESTHub (2026)
+							</button>
+						</div>
+					</div>
+				</div>
 
 				<div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
 					<div className="bg-slate-50 rounded-xl p-5 border border-slate-200 shadow-sm flex flex-col">
@@ -144,15 +528,11 @@ export default function Step2Overview() {
 						<div className="flex items-center gap-2 text-slate-500 mb-2">
 							<TrendingUp size={18} />
 							<span className="text-[11px] uppercase font-bold tracking-wider">
-								Hinnanguline Väärtus
+								Keskmine Vanus
 							</span>
 						</div>
-						<p className="text-3xl font-black text-emerald-600">
-							{new Intl.NumberFormat("et-EE", {
-								style: "currency",
-								currency: data.currency || "EUR",
-								maximumFractionDigits: 0,
-							}).format(data.totalValue || 0)}
+						<p className="text-3xl font-black text-slate-900">
+							{avgAge > 0 ? `${avgAge} a` : "Määramata"}
 						</p>
 					</div>
 				</div>
@@ -172,7 +552,7 @@ export default function Step2Overview() {
 									<th className="py-3 px-4">Pindala</th>
 									<th className="py-3 px-4">Peapuuliik</th>
 									<th className="py-3 px-4">Vanus</th>
-									<th className="py-3 px-4 text-right">Väärtus</th>
+									<th className="py-3 px-4">Seire Staatus</th>
 									<th className="py-3 px-4 w-12"></th>
 								</tr>
 							</thead>
@@ -180,6 +560,10 @@ export default function Step2Overview() {
 								{data.details?.map((detail: any) => {
 									const isExpanded = expandedEraldis === detail.eraldisId;
 									const m = detail.meta || {};
+									const audit = detail.satelliteAudit;
+									const period = state.satelliteAuditPeriod;
+									const statusInfo = checkRaieStatus(detail);
+									
 									return (
 										<React.Fragment key={detail.eraldisId}>
 											<tr
@@ -188,7 +572,13 @@ export default function Step2Overview() {
 													isExpanded ? "bg-slate-50" : ""
 												}`}
 											>
-												<td className="py-3 px-4 font-bold text-slate-800">
+												<td className={`py-3 px-4 font-bold text-slate-800 border-l-4 ${
+													statusInfo.lubatud 
+														? "border-l-emerald-500 bg-emerald-50/5" 
+														: statusInfo.viga 
+															? "border-l-rose-500 bg-rose-50/5" 
+															: "border-l-red-500 bg-red-50/5"
+												}`}>
 													{detail.eraldisId}
 												</td>
 												<td className="py-3 px-4">{detail.pindala} ha</td>
@@ -196,15 +586,37 @@ export default function Step2Overview() {
 													{m.peapuuliik_kood || m.peapuuliik || "-"}
 												</td>
 												<td className="py-3 px-4">
-													{m.keskm_vanus || m.vanus || "-"} a
+													<div className="flex items-center gap-1.5">
+														<span>{m.keskm_vanus || m.vanus || "-"} a</span>
+														{statusInfo.lubatud ? (
+															<span className="px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200 rounded shrink-0 animate-pulse" title="Raiutav (küps või saavutanud raievanuse)">Raiutav</span>
+														) : statusInfo.viga ? (
+															<span className="px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-200 rounded shrink-0" title="VIGA: Metsaregistri andmetes puudub ametlik raievanus!">VIGA</span>
+														) : (
+															<span className="px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider bg-red-50 text-red-600 border border-red-200 rounded shrink-0" title={statusInfo.pohjus}>Keelatud</span>
+														)}
+													</div>
 												</td>
-												<td className="py-3 px-4 text-right font-medium text-emerald-600 whitespace-nowrap">
-													{new Intl.NumberFormat("et-EE", {
-														style: "currency",
-														currency: "EUR",
-														maximumFractionDigits: 0,
-													}).format(detail.value || 0)}
+												<td className="py-3 px-4">
+													{period === 'registry' || !audit ? (
+														<span className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-full bg-slate-100 text-slate-500 border border-slate-200">
+															Kontrollimata
+														</span>
+													) : audit.status === 'HEALTHY' ? (
+														<span className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1 w-fit">
+															<ShieldCheck size={11} className="shrink-0" /> Terve mets
+														</span>
+													) : audit.status === 'THINNED' ? (
+														<span className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-full bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1 w-fit">
+															<Eye size={11} className="shrink-0" /> Osaline raie
+														</span>
+													) : (
+														<span className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-full bg-red-50 text-red-700 border border-red-200 flex items-center gap-1 w-fit">
+															<ShieldAlert size={11} className="shrink-0" /> Lageraie
+														</span>
+													)}
 												</td>
+
 												<td className="py-3 px-4 text-slate-400 text-center">
 													{isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
 												</td>
@@ -213,7 +625,7 @@ export default function Step2Overview() {
 												<tr className="bg-slate-50 border-b border-slate-200">
 													<td colSpan={6} className="p-0">
 														<div className="p-4 md:p-6 text-slate-700 animate-in fade-in slide-in-from-top-2 duration-200 border-t border-slate-100">
-															<div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+															<div className="grid grid-cols-1 md:grid-cols-3 gap-6">
 																<div>
 																	<h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-2">
 																		<Info size={14} /> Üldandmed
@@ -239,6 +651,24 @@ export default function Step2Overview() {
 																			<span className="text-slate-500">Tagavara</span>
 																			<span className="font-medium text-slate-900">{m.tagavara_y_ha ? `${m.tagavara_y_ha} tm/ha` : "-"}</span>
 																		</li>
+																		<li className="flex justify-between border-b border-slate-200 pb-1">
+																			<span className="text-slate-500">Minimaalne raievanus</span>
+																			<span className={`font-semibold ${statusInfo.viga ? "text-rose-600" : "text-slate-800"}`}>
+																				{statusInfo.viga ? "Määramata (Puudub registris)" : `${statusInfo.raievanus} a`}
+																			</span>
+																		</li>
+																		<li className="flex justify-between pt-1">
+																			<span className="text-slate-500">Raie lubatavus</span>
+																			<span className={`font-bold text-[10px] uppercase tracking-wide px-2.5 py-0.5 rounded-full ${
+																				statusInfo.lubatud 
+																					? "bg-emerald-50 text-emerald-700 border border-emerald-200" 
+																					: statusInfo.viga 
+																						? "bg-rose-50 text-rose-700 border border-rose-200 animate-pulse" 
+																						: "bg-red-50 text-red-700 border border-red-200"
+																			}`}>
+																				{statusInfo.pohjus}
+																			</span>
+																		</li>
 																	</ul>
 																</div>
 
@@ -254,13 +684,6 @@ export default function Step2Overview() {
 																					<div key={liik} className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
 																						<div className="flex justify-between font-bold text-sm mb-2 border-b border-slate-100 pb-1">
 																							<span className="text-slate-800">Puuliik: {liik}</span>
-																							<span className="text-emerald-600">
-																								{new Intl.NumberFormat("et-EE", {
-																									style: "currency",
-																									currency: "EUR",
-																									maximumFractionDigits: 0,
-																								}).format(sort.value || 0)}
-																							</span>
 																						</div>
 																						<div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
 																							<div className="flex justify-between">
@@ -289,6 +712,113 @@ export default function Step2Overview() {
 																		<p className="text-sm bg-white p-3 rounded-lg border border-slate-200 text-slate-600">
 																			{detail.note || "Detailsed sortimendid puuduvad."}
 																		</p>
+																	</div>
+																)}
+
+																{/* ESTHub Sentinel-2 Seire details */}
+																{audit && (
+																	<div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col gap-3">
+																		<h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1 flex items-center gap-2">
+																			<Activity size={14} /> ESTHub Sentinel-2 Seire
+																		</h4>
+																		
+																		<ul className="space-y-2 text-xs">
+																			<li className="flex justify-between border-b border-slate-200 pb-1">
+																				<span className="text-slate-500">Mõõdetud NDVI</span>
+																				<span className={`font-mono font-bold ${audit.status === 'CLEARCUT' ? 'text-red-600' : audit.status === 'THINNED' ? 'text-amber-600' : 'text-emerald-700'}`}>
+																					{audit.ndviActual.toFixed(2)} / {audit.ndviExpected.toFixed(2)} {period === 'active' ? '(Tegelik)' : ''}
+																				</span>
+																			</li>
+																			<li className="flex justify-between border-b border-slate-200 pb-1">
+																				<span className="text-slate-500">Pinnase niiskus (NDPI)</span>
+																				<span className="font-mono font-semibold text-slate-800">
+																					{audit.ndpiActual.toFixed(2)} {audit.status === 'CLEARCUT' ? '(Kõrge)' : '(Normalne)'}
+																				</span>
+																			</li>
+																			<li className="flex justify-between border-b border-slate-200 pb-1">
+																				<span className="text-slate-500">Raie tõenäosus</span>
+																				<span className="font-semibold text-slate-900">{audit.clearcutProbability}%</span>
+																			</li>
+																			<li className="flex justify-between border-b border-slate-200 pb-1">
+																				<span className="text-slate-500">Viimane seire kuupäev</span>
+																				<span className="font-medium text-slate-900">{audit.auditDate}</span>
+																			</li>
+																			<li className="flex justify-between border-b border-slate-200 pb-1">
+																				<span className="text-slate-500">Metsa tagatisväärtus</span>
+																				<span className="font-bold text-slate-900 font-mono">
+																					{new Intl.NumberFormat("et-EE", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(period === 'active' ? audit.adjustedValue : audit.originalValue)}
+																				</span>
+																				{period === 'active' && audit.status !== 'HEALTHY' && (
+																					<div className="bg-white p-2.5 rounded-lg border border-slate-200 flex flex-col gap-1 shadow-sm mt-1">
+																						<span className="text-[9px] font-black uppercase tracking-wide text-amber-600">Auditiparandus</span>
+																						<p className="text-[10px] text-slate-600 leading-relaxed">
+																							{audit.status === 'CLEARCUT' 
+																								? `Klorofülli taseme järsu languse tõttu (NDVI: ${audit.ndviActual.toFixed(2)}) tuvastas satelliit lageraiet. Puidu väärtus vähendati nulliks.` 
+																								: `Vedeldatud taimkatte tõttu on puidu mahtu korrigeeritud -40% (harvendusraie).`
+																							}
+																						</p>
+																					</div>
+																				)}
+																			</li>
+																		</ul>
+																		
+																		{/* ESTHub REAALSED Mõõtmised (GetFeatureInfo) */}
+																		{(() => {
+																			const realData = realSatData[detail.eraldisId];
+																			if (!realData || realData.error === 'NO_DATA') return null;
+																			return (
+																				<div className={`p-4 rounded-xl border flex flex-col gap-3 ${
+																					realData.status === 'CLEARCUT' ? 'bg-red-50 border-red-200' :
+																					realData.status === 'THINNED' ? 'bg-amber-50 border-amber-200' :
+																					'bg-emerald-50 border-emerald-200'
+																				}`}>
+																					<div className="flex items-center justify-between">
+																						<h4 className="text-xs font-bold uppercase tracking-wider flex items-center gap-2 text-slate-600">
+																							<Satellite size={14} /> ESTHub — Reaalne mõõtmine
+																						</h4>
+																						<div className="flex items-center gap-1.5">
+																							<span className={`px-2 py-0.5 text-[9px] font-black uppercase tracking-wider rounded-full border ${
+																								realData.status === 'CLEARCUT' ? 'bg-red-100 text-red-700 border-red-300' :
+																								realData.status === 'THINNED' ? 'bg-amber-100 text-amber-700 border-amber-300' :
+																								'bg-emerald-100 text-emerald-700 border-emerald-300'
+																							}`}>
+																								{realData.status === 'CLEARCUT' ? '⚠ Lageraie' :
+																								 realData.status === 'THINNED' ? '~ Osaline raie' :
+																								 '✓ Terve mets'}
+																							</span>
+																							{realData.stale && (
+																								<span className="px-1.5 py-0.5 text-[8px] font-black uppercase bg-amber-100 text-amber-700 border border-amber-300 rounded">Vana pilt</span>
+																							)}
+																						</div>
+																					</div>
+																					<ul className="space-y-1.5 text-xs">
+																						<li className="flex justify-between border-b border-black/10 pb-1">
+																							<span className="text-slate-600">Mõõdetud NDVI</span>
+																							<span className={`font-mono font-bold ${
+																								realData.status === 'CLEARCUT' ? 'text-red-700' :
+																								realData.status === 'THINNED' ? 'text-amber-700' : 'text-emerald-700'
+																							}`}>
+																								{realData.ndvi?.toFixed(3) ?? 'N/A'}
+																							</span>
+																						</li>
+																						<li className="flex justify-between border-b border-black/10 pb-1">
+																							<span className="text-slate-600">Mõõdetud NDPI</span>
+																							<span className="font-mono font-semibold text-slate-700">{realData.ndpi?.toFixed(3) ?? 'N/A'}</span>
+																						</li>
+																						<li className="flex justify-between pt-0.5">
+																							<span className="text-slate-600">Satelliitpildi kuupäev</span>
+																							<span className="font-medium text-slate-800">
+																								{realData.date ? new Date(realData.date).toLocaleDateString("et-EE", { day: "numeric", month: "long", year: "numeric" }) : '-'}
+																								{!realData.cloudfree && <span className="ml-1 text-amber-600">(lähim)</span>}
+																							</span>
+																						</li>
+																					</ul>
+																					{realData.warning && (
+																						<p className="text-[10px] text-amber-700 bg-amber-100 px-2 py-1.5 rounded border border-amber-200">{realData.warning}</p>
+																					)}
+																				</div>
+																			);
+																		})()}
 																	</div>
 																)}
 															</div>
@@ -322,7 +852,8 @@ export default function Step2Overview() {
 				</button>
 				<button
 					onClick={nextStep}
-					className="px-8 py-3 rounded-xl font-bold text-white bg-slate-900 hover:bg-emerald-700 flex items-center gap-2 transition-colors shadow-sm"
+					disabled={hasFellingAgeError}
+					className="px-8 py-3 rounded-xl font-bold text-white bg-slate-900 hover:bg-emerald-700 flex items-center gap-2 transition-colors shadow-sm disabled:opacity-50 disabled:bg-slate-300 disabled:cursor-not-allowed"
 				>
 					Vali Eraldised <ArrowRight size={18} />
 				</button>

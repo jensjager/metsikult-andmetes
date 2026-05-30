@@ -3,10 +3,9 @@
 import { useCalculator } from "@/lib/CalculatorContext";
 import Step1Input from "./steps/Step1Input";
 import Step2Overview from "./steps/Step2Overview";
-import Step3Selection from "./steps/Step3Selection";
-import Step4Storage from "./steps/Step4Storage";
-import Step5Costs from "./steps/Step5Costs";
-import Step6Results from "./steps/Step6Results";
+import Step3Storage from "./steps/Step4Storage";
+import Step4Costs from "./steps/Step5Costs";
+import Step5Results from "./steps/Step6Results";
 import { Check } from "lucide-react";
 
 export default function WizardContainer() {
@@ -15,10 +14,9 @@ export default function WizardContainer() {
 	const steps = [
 		{ id: 1, title: "Sisend" },
 		{ id: 2, title: "Ülevaade" },
-		{ id: 3, title: "Eraldised" },
-		{ id: 4, title: "Ladustamine" },
-		{ id: 5, title: "Kulud" },
-		{ id: 6, title: "Tulemused" },
+		{ id: 3, title: "Ladustamine" },
+		{ id: 4, title: "Kulud" },
+		{ id: 5, title: "Tulemused" },
 	];
 
 	return (
@@ -71,10 +69,9 @@ export default function WizardContainer() {
 			<div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
 				{state.currentStep === 1 && <Step1Input />}
 				{state.currentStep === 2 && <Step2Overview />}
-				{state.currentStep === 3 && <Step3Selection />}
-				{state.currentStep === 4 && <Step4Storage />}
-				{state.currentStep === 5 && <Step5Costs />}
-				{state.currentStep === 6 && <Step6Results />}
+				{state.currentStep === 3 && <Step3Storage />}
+				{state.currentStep === 4 && <Step4Costs />}
+				{state.currentStep === 5 && <Step5Results />}
 			</div>
 		</div>
 	);

@@ -89,20 +89,8 @@ export default function CalculatorForm() {
     }, 50);
 
     try {
-      const res = await fetch("/api/arvuta", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ katastritunnus }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || "Päring ebaõnnestus");
-      }
-
+      const { calculateForestValueClient } = await import("@/lib/client-api");
+      const data = await calculateForestValueClient(katastritunnus);
       setResult(data);
     } catch (err: any) {
       setError(err.message || "Midagi läks valesti andmete laadimisel.");

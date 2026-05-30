@@ -38,15 +38,8 @@ export default function Step1Input() {
     setKatastritunnus(kat);
 
     try {
-      const res = await fetch("/api/arvuta", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ katastritunnus: kat }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Päring ebaõnnestus");
-
+      const { calculateForestValueClient } = await import("@/lib/client-api");
+      const data = await calculateForestValueClient(kat);
       setApiData(data);
       nextStep();
     } catch (err: any) {
@@ -70,27 +63,174 @@ export default function Step1Input() {
         const parser = new DOMParser();
         const xmlDoc = parser.parseFromString(text, "text/xml");
 
-        const eraldisedElements = xmlDoc.getElementsByTagName("eraldis");
-        const kinnistuNrNode = xmlDoc.getElementsByTagName("kinnistuNr")[0] || xmlDoc.getElementsByTagName("katastritunnus")[0];
+        let eraldisedElements = xmlDoc.getElementsByTagName("eraldis");
+        if (eraldisedElements.length === 0) {
+          eraldisedElements = xmlDoc.getElementsByTagName("mets:eraldis");
+        }
+
+        const kinnistuNrNode = xmlDoc.getElementsByTagName("kinnistuNr")[0] || 
+                               xmlDoc.getElementsByTagName("mets:kinnistuNr")[0] ||
+                               xmlDoc.getElementsByTagName("katastritunnus")[0] ||
+                               xmlDoc.getElementsByTagName("mets:katastritunnus")[0] ||
+                               xmlDoc.getElementsByTagName("katastriNr")[0] ||
+                               xmlDoc.getElementsByTagName("mets:katastriNr")[0];
         const extractedKat = kinnistuNrNode ? kinnistuNrNode.textContent || "XML-Fail" : "XML-Fail";
         setKatastritunnus(extractedKat);
 
         const details = [];
         let totalPindala = 0;
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+        const parseXmlGeometry = (eraldisNode: Element) => {
+          const geoNode = eraldisNode.getElementsByTagName("geomeetria")[0] || 
+                          eraldisNode.getElementsByTagName("mets:geomeetria")[0];
+          if (!geoNode) return null;
+          
+          const outerNode = geoNode.getElementsByTagName("outerBoundaryIs")[0] || 
+                            geoNode.getElementsByTagName("gml:outerBoundaryIs")[0];
+          const innerNodes = geoNode.getElementsByTagName("innerBoundaryIs").length > 0
+            ? geoNode.getElementsByTagName("innerBoundaryIs")
+            : geoNode.getElementsByTagName("gml:innerBoundaryIs");
+          
+          const parseCoords = (boundaryNode: Element) => {
+            const coordNode = boundaryNode.getElementsByTagName("coordinates")[0] || 
+                              boundaryNode.getElementsByTagName("gml:coordinates")[0];
+            if (coordNode && coordNode.textContent) {
+              return coordNode.textContent.trim().split(/\s+/).map(pair => {
+                const parts = pair.split(',');
+                return [parseFloat(parts[0]), parseFloat(parts[1])];
+              });
+            }
+            return [];
+          };
+
+          if (outerNode) {
+            const outerCoords = parseCoords(outerNode);
+            if (outerCoords.length > 0) {
+              const polygonCoords = [outerCoords];
+              if (innerNodes && innerNodes.length > 0) {
+                for (let j = 0; j < innerNodes.length; j++) {
+                  const innerCoords = parseCoords(innerNodes[j]);
+                  if (innerCoords.length > 0) {
+                    polygonCoords.push(innerCoords);
+                  }
+                }
+              }
+              return {
+                type: "Polygon",
+                coordinates: polygonCoords
+              };
+            }
+          }
+          return null;
+        };
 
         for (let i = 0; i < eraldisedElements.length; i++) {
           const eraldis = eraldisedElements[i];
-          const nr = eraldis.getElementsByTagName("number")[0]?.textContent || eraldis.getElementsByTagName("eraldisId")[0]?.textContent || String(i + 1);
-          const pindala = parseFloat(eraldis.getElementsByTagName("pindala")[0]?.textContent || "1.0");
+          const nr = eraldis.getElementsByTagName("number")[0]?.textContent || 
+                     eraldis.getElementsByTagName("mets:number")[0]?.textContent || 
+                     eraldis.getElementsByTagName("eraldisId")[0]?.textContent || 
+                     eraldis.getElementsByTagName("mets:eraldisId")[0]?.textContent || 
+                     eraldis.getElementsByTagName("eraldiseNr")[0]?.textContent || 
+                     eraldis.getElementsByTagName("mets:eraldiseNr")[0]?.textContent || 
+                     String(i + 1);
+          const pindala = parseFloat(eraldis.getElementsByTagName("pindala")[0]?.textContent || 
+                                     eraldis.getElementsByTagName("mets:pindala")[0]?.textContent || 
+                                     "1.0");
           totalPindala += pindala;
           
+          const geometry = parseXmlGeometry(eraldis);
+          if (geometry) {
+            const extractPoints = (coords: any[]) => {
+              if (typeof coords[0] === 'number') {
+                const [x, y] = coords;
+                if (x < minX) minX = x;
+                if (y < minY) minY = y;
+                if (x > maxX) maxX = x;
+                if (y > maxY) maxY = y;
+              } else {
+                for (const c of coords) extractPoints(c);
+              }
+            };
+            extractPoints(geometry.coordinates);
+          }
+
+          const arenguklass = eraldis.getElementsByTagName("arenguklass")[0]?.textContent || 
+                              eraldis.getElementsByTagName("mets:arenguklass")[0]?.textContent || 
+                              "";
+          const vanus = parseInt(eraldis.getElementsByTagName("kkVanus")[0]?.textContent || 
+                                 eraldis.getElementsByTagName("mets:kkVanus")[0]?.textContent || 
+                                 "0", 10);
+          const raievanus = parseInt(eraldis.getElementsByTagName("kkRaievanus")[0]?.textContent || 
+                                    eraldis.getElementsByTagName("mets:kkRaievanus")[0]?.textContent || 
+                                    "0", 10);
+          const peapuuliik = eraldis.getElementsByTagName("peapuuliik")[0]?.textContent || 
+                             eraldis.getElementsByTagName("mets:peapuuliik")[0]?.textContent || 
+                             "";
+          const boniteet = eraldis.getElementsByTagName("boniteet")[0]?.textContent || 
+                           eraldis.getElementsByTagName("mets:boniteet")[0]?.textContent || 
+                           "";
+          const kasvukoht = eraldis.getElementsByTagName("kasvukoht")[0]?.textContent || 
+                            eraldis.getElementsByTagName("mets:kasvukoht")[0]?.textContent || 
+                            "";
+          const korgus = parseFloat(eraldis.getElementsByTagName("korgusIndeks")[0]?.textContent || 
+                                    eraldis.getElementsByTagName("mets:korgusIndeks")[0]?.textContent || 
+                                    "0");
+          const tagavaraYHa = parseFloat(eraldis.getElementsByTagName("tagavara1Ha")[0]?.textContent || 
+                                         eraldis.getElementsByTagName("mets:tagavara1Ha")[0]?.textContent || 
+                                         "0");
+
           details.push({
             eraldisId: nr,
             pindala: pindala,
             value: pindala * 2500,
             note: "Loetud XML failist",
-            meta: { Allikas: "XML Üleslaadimine" }
+            meta: { 
+              Allikas: "XML Üleslaadimine",
+              arengukl_kood: arenguklass,
+              arenguklass: arenguklass,
+              keskm_vanus: vanus,
+              vanus: vanus,
+              raievanus: raievanus,
+              kk_raievanus: raievanus,
+              peapuuliik_kood: peapuuliik,
+              peapuuliik: peapuuliik,
+              boniteedi_kood: boniteet,
+              kasvukoht_kood: kasvukoht,
+              korgus: korgus,
+              tagavara_y_ha: tagavaraYHa
+            },
+            geometry: geometry
           });
+        }
+
+        let bbox: number[] | undefined = undefined;
+        if (minX !== Infinity) {
+          const width = Math.max(maxX - minX, 10);
+          const height = Math.max(maxY - minY, 10);
+          
+          const cx = minX + width / 2;
+          const cy = minY + height / 2;
+          
+          const targetAspect = 1000 / 600;
+          const currentAspect = width / height;
+          
+          let targetW = width;
+          let targetH = height;
+          
+          if (currentAspect > targetAspect) {
+             targetH = targetW / targetAspect;
+          } else {
+             targetW = targetH * targetAspect;
+          }
+          
+          const bufferW = targetW * 0.5;
+          const bufferH = targetH * 0.5;
+          
+          const finalW = Math.max(targetW + bufferW, 200);
+          const finalH = Math.max(targetH + bufferH, 120);
+          
+          bbox = [cx - finalW/2, cy - finalH/2, cx + finalW/2, cy + finalH/2];
         }
 
         const totalValue = details.reduce((sum, d) => sum + d.value, 0);
@@ -102,6 +242,7 @@ export default function Step1Input() {
           totalValue: totalValue,
           currency: "EUR",
           details: details,
+          bbox: bbox,
           warning: "Andmed loeti edukalt XML failist. Väärtused on hinnangulised."
         };
 

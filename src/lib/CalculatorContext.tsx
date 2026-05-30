@@ -7,6 +7,9 @@ interface ResultData {
   katastritunnus: string;
   eraldisteArv: number;
   totalValue: number;
+  originalTotalValue?: number;
+  avertedLoss?: number;
+  satelliteAudited?: boolean;
   currency: string;
   warning?: string;
   bbox?: number[];
@@ -21,6 +24,7 @@ interface CalculatorState {
   selectedEraldised: string[];
   storageLocation: any;
   costs: any;
+  satelliteAuditPeriod: 'registry' | 'active';
 }
 
 interface CalculatorContextType {
@@ -34,6 +38,7 @@ interface CalculatorContextType {
   setSelectedEraldised: (ids: string[]) => void;
   setStorageLocation: (loc: any) => void;
   setCosts: (costs: any) => void;
+  setSatelliteAuditPeriod: (period: 'registry' | 'active') => void;
   reset: () => void;
 }
 
@@ -45,6 +50,7 @@ const defaultState: CalculatorState = {
   selectedEraldised: [],
   storageLocation: null,
   costs: null,
+  satelliteAuditPeriod: 'active', // default is 'active' to run satellite check immediately
 };
 
 const CalculatorContext = createContext<CalculatorContextType | undefined>(undefined);
@@ -87,6 +93,7 @@ export function CalculatorProvider({ children }: { children: ReactNode }) {
   const setSelectedEraldised = (ids: string[]) => updateState({ selectedEraldised: ids });
   const setStorageLocation = (loc: any) => updateState({ storageLocation: loc });
   const setCosts = (costs: any) => updateState({ costs });
+  const setSatelliteAuditPeriod = (period: 'registry' | 'active') => updateState({ satelliteAuditPeriod: period });
 
   const reset = () => {
     setState(defaultState);
@@ -106,6 +113,7 @@ export function CalculatorProvider({ children }: { children: ReactNode }) {
         setSelectedEraldised,
         setStorageLocation,
         setCosts,
+        setSatelliteAuditPeriod,
         reset,
       }}
     >
