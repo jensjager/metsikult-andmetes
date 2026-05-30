@@ -222,7 +222,6 @@ export function calculateForestValue(
       }
       
       value = elementsValue;
-      note = `Arvutatud ametliku metoodika alusel. Kokku ${totalTm.toFixed(1)} tm sortimentides.`;
     } 
     else {
       const tagavaraHektaril = props.tagavara_y_ha || props.tagavara_1_ha || 0;

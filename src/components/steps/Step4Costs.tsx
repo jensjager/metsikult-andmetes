@@ -4,7 +4,7 @@ import { useCalculator } from "@/lib/CalculatorContext";
 import { ArrowRight, ArrowLeft, TrendingDown, Info, DollarSign, ShieldAlert } from "lucide-react";
 import React, { useEffect } from "react";
 
-export default function Step5Costs() {
+export default function Step4Costs() {
 	const { state, setCosts, nextStep, prevStep } = useCalculator();
 	const data = state.apiData || state.xmlData;
 
@@ -15,53 +15,64 @@ export default function Step5Costs() {
 	if (!data) return null;
 
 	// 1. Calculate felling volume (in tihumeetrid / tm)
-	const selectedStands = data.details.filter((d: any) => state.selectedEraldised.includes(d.eraldisId));
+	const selectedStands = data.details.filter((d: any) => {
+		const t = state.selectedEraldised[d.eraldisId];
+		return t === 'LR' || t === 'HR';
+	});
 	
-	const totalVolume = selectedStands.reduce((sum: number, stand: any) => {
-		if (stand.elemendid && stand.elemendid.length > 0) {
-			return sum + stand.elemendid.reduce((s: number, el: any) => s + (el.tagavara_absoluutne || 0), 0);
-		}
-		const pindala = stand.pindala || 0;
-		const tagavaraHa = stand.meta?.tagavara_y_ha || stand.meta?.tagavara_1_ha || 0;
-		return sum + (tagavaraHa * pindala);
-	}, 0);
-
-	// Gross forest stand value
-	const grossValue = selectedStands.reduce((sum: number, d: any) => sum + (d.value || 0), 0);
-
-	// Get logistics info from Step 4
 	const avgForwardingDistance = state.storageLocation?.avgForwardingDistance || 0;
 	const accessRoadDistance = state.storageLocation?.accessRoadDistance || 0;
 	const roadQuality = state.storageLocation?.roadQuality || "gravel";
 
 	// 2. Cost calculations
-	// Lisa 7: Raiekulu (RK) arvutamise valem
-	// RK = a0 + a1 / (a2 + v) + a3 * v^a4 + a5 * KVK
-	const getFellingRate = () => {
-		// v – keskmine raiutav tüvemaht (m3). Kui on > 1 m3, siis v = 1.
-		// Kuna meil pole hetkel täpset puude arvu käepärast, eeldame näiteks v = 0.5
-		const v = 0.5; // TODO: arvuta tegelik keskmine tüvemaht andmetest
-		const KVK = avgForwardingDistance; // keskmine kokkuveokaugus, m
+	// Lisa 7: Raiekulu (RK) arvutamise valem (lihtsustatud baasväärtustega raietüübiti)
+	const getFellingRate = (type: string) => {
+		const v = 0.5; // Eeldame keskmist tüvemahtu
+		const KVK = avgForwardingDistance;
 
-		// RMK regressioonikonstandid (puuduvad dokumendist, paneme ajutised)
-		const a0 = 11.5; 
+		// HR (Harvendusraie) on kallim kui LR (Lageraie)
+		const a0 = type === 'HR' ? 18.5 : 11.5; 
 		const a1 = 0;
 		const a2 = 1;
 		const a3 = 0;
 		const a4 = 1;
 		const a5 = 0;
 
-		const RK = a0 + a1 / (a2 + v) + a3 * Math.pow(v, a4) + a5 * KVK;
-		return RK;
+		return a0 + a1 / (a2 + v) + a3 * Math.pow(v, a4) + a5 * KVK;
 	};
 
-	const fellingRate = getFellingRate();
-	const fellingCost = totalVolume * fellingRate;
+	const getForwardingRate = () => {
+		return 6.0 + (avgForwardingDistance * 0.006);
+	};
 
-	// Forwarding cost based on average distance
-	// Base is 6 EUR/tm, adds 0.005 EUR per meter of distance (5 EUR per km)
-	const forwardingRate = 6.0 + (avgForwardingDistance * 0.006);
-	const forwardingCost = totalVolume * forwardingRate;
+	let totalVolume = 0;
+	let grossValue = 0;
+	let fellingCost = 0;
+	let forwardingCost = 0;
+
+	selectedStands.forEach((stand: any) => {
+		const type = state.selectedEraldised[stand.eraldisId];
+		const multiplier = type === 'HR' ? 0.4 : 1.0;
+
+		let volume = 0;
+		if (stand.elemendid && stand.elemendid.length > 0) {
+			volume = stand.elemendid.reduce((s: number, el: any) => s + (el.tagavara_absoluutne || 0), 0) * multiplier;
+		} else {
+			const pindala = stand.pindala || 0;
+			const tagavaraHa = stand.meta?.tagavara_y_ha || stand.meta?.tagavara_1_ha || 0;
+			volume = tagavaraHa * pindala * multiplier;
+		}
+
+		totalVolume += volume;
+		grossValue += (stand.value || 0) * multiplier;
+
+		fellingCost += volume * getFellingRate(type);
+		forwardingCost += volume * getForwardingRate();
+	});
+
+	// For display averages
+	const fellingRate = totalVolume > 0 ? fellingCost / totalVolume : 0;
+	const forwardingRate = totalVolume > 0 ? forwardingCost / totalVolume : 0;
 
 	// Total and averages
 	const totalCosts = fellingCost + forwardingCost;
@@ -105,11 +116,9 @@ export default function Step5Costs() {
 						<h2 className="text-2xl font-bold text-slate-900">Kulude kalkulatsioon</h2>
 						<p className="text-slate-500 text-sm mt-1">Hinda raie-, kokkuveo- ja transpordikulusid parimate turuhindade põhjal</p>
 					</div>
-					<div className="flex gap-2">
-						<span className="px-3 py-1 bg-slate-100 text-slate-600 rounded-full text-xs font-mono font-bold border border-slate-200">
-							Kokku maht: {totalVolume.toFixed(1)} tm
-						</span>
-					</div>
+					<span className="self-start sm:self-center px-3 py-1 bg-slate-100 text-slate-600 rounded-full text-xs font-mono font-bold border border-slate-200">
+						{state.katastritunnus}
+					</span>
 				</div>
 
 				<div className="flex flex-col gap-8">
@@ -172,13 +181,17 @@ export default function Step5Costs() {
 								)}
 							</div>
 
-							<div className="grid grid-cols-3 gap-4 text-center mt-2">
+							<div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center mt-2">
+								<div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
+									<span className="text-[9px] uppercase font-bold text-slate-400 block mb-0.5">Kokku maht</span>
+									<span className="text-base font-black text-slate-800">{totalVolume.toFixed(1)} tm</span>
+								</div>
 								<div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
 									<span className="text-[9px] uppercase font-bold text-slate-400 block mb-0.5">Metsa brutoväärtus</span>
 									<span className="text-base font-black text-slate-800">{formatCurrency(grossValue)}</span>
 								</div>
 								<div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
-									<span className="text-[9px] uppercase font-bold text-slate-400 block mb-0.5">Kulud kokku ({avgCostPerTm.toFixed(1)} €/tm)</span>
+									<span className="text-[9px] uppercase font-bold text-slate-400 block mb-0.5">Kulud ({avgCostPerTm.toFixed(1)} €/tm)</span>
 									<span className="text-base font-black text-red-600">{formatCurrency(totalCosts)}</span>
 								</div>
 								<div className="bg-white p-3 rounded-lg border border-emerald-300 shadow-sm bg-emerald-50/20">

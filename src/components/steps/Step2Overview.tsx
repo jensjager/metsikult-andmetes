@@ -16,7 +16,7 @@ interface RealSatResult {
 }
 
 export default function Step2Overview() {
-	const { state, nextStep, prevStep, setSatelliteAuditPeriod, setApiData, setXmlData } = useCalculator();
+	const { state, nextStep, prevStep, setSatelliteAuditPeriod, setApiData, setXmlData, setSelectedEraldised } = useCalculator();
 	const data = state.apiData || state.xmlData;
 	const [expandedEraldis, setExpandedEraldis] = useState<string | null>(null);
 	const [mapLayer, setMapLayer] = useState<"EESTIFOTO" | "METSAFOTO" | "DSM" | "NDVI" | "NRG" | "NDPI">("EESTIFOTO");
@@ -73,7 +73,7 @@ export default function Step2Overview() {
 					if (!centroid) return { id: detail.eraldisId, data: null };
 
 					try {
-						const satData = await fetchSatelliteAuditClient(centroid.cx, centroid.cy, cloudFreeDate);
+						const satData = await fetchSatelliteAuditClient(centroid.cx, centroid.cy);
 						return { id: detail.eraldisId, data: satData };
 					} catch {
 						return { id: detail.eraldisId, data: null };
@@ -93,7 +93,29 @@ export default function Step2Overview() {
 			setSatLoading(false);
 		}
 	}, [computeCentroid]);
+	const checkRaieStatus = React.useCallback((stand: any) => {
+		const m = stand.meta || {};
+		const arenguklass = (m.arengukl_kood || m.arenguklass || "").toLowerCase().trim();
+		const vanus = parseInt(m.keskm_vanus || m.vanus || "0", 10);
+		const raievanus = parseInt(m.raievanus || m.kk_raievanus || m.kkraievanus || m.kaalutud_raievanus || m.keskm_raievanus || m.keskmRaievanus || "0", 10);
 
+		if (raievanus <= 0) return { lubatud: false, viga: true, pohjus: "VIGA: Metsaregistrist puudub ametlik raievanus!", raievanus: 0, vanus };
+		const isKups = arenguklass.includes("küps") || arenguklass.includes("kups") || arenguklass === "kü" || arenguklass === "ku";
+		if (isKups) return { lubatud: true, pohjus: "LUBATUD (Küps mets)", raievanus, vanus };
+		if (vanus >= raievanus) return { lubatud: true, pohjus: `LUBATUD (Vanus ${vanus} a >= raievanus ${raievanus} a)`, raievanus, vanus };
+		return { lubatud: false, pohjus: `EI (Raievanus ${raievanus} a, praegu ${vanus} a)`, raievanus, vanus };
+	}, []);
+
+	React.useEffect(() => {
+		if (data?.details && Object.keys(state.selectedEraldised).length === 0) {
+			const initialSelection: Record<string, 'LR' | 'HR' | 'X'> = {};
+			data.details.forEach((d: any) => {
+				const isAllowed = checkRaieStatus(d).lubatud;
+				initialSelection[d.eraldisId] = isAllowed ? 'LR' : 'X';
+			});
+			setSelectedEraldised(initialSelection);
+		}
+	}, [data?.details, state.selectedEraldised, checkRaieStatus, setSelectedEraldised]);
 	React.useEffect(() => {
 		if (data?.details && Object.keys(realSatData).length === 0 && !satLoading) {
 			fetchRealSatelliteData(data.details);
@@ -116,53 +138,7 @@ export default function Step2Overview() {
 		return count > 0 ? Math.round(sumAge / count) : 0;
 	})();
 
-	const checkRaieStatus = (stand: any) => {
-		const m = stand.meta || {};
-		const arenguklass = (m.arengukl_kood || m.arenguklass || "").toLowerCase().trim();
-		const vanus = parseInt(m.keskm_vanus || m.vanus || "0", 10);
-		
-		// Fetch official raievanus directly from the API or XML
-		const raievanus = parseInt(m.raievanus || m.kk_raievanus || m.kkraievanus || m.kaalutud_raievanus || m.keskm_raievanus || m.keskmRaievanus || "0", 10);
 
-		if (raievanus <= 0) {
-			return {
-				lubatud: false,
-				viga: true,
-				pohjus: "VIGA: Metsaregistrist puudub ametlik raievanus!",
-				raievanus: 0,
-				vanus
-			};
-		}
-
-		const isKups = arenguklass.includes("küps") || arenguklass.includes("kups") || arenguklass === "kü" || arenguklass === "ku";
-
-		if (isKups) {
-			return {
-				lubatud: true,
-				pohjus: "LUBATUD (Küps mets)",
-				raievanus,
-				vanus
-			};
-		}
-
-		if (vanus >= raievanus) {
-			return {
-				lubatud: true,
-				pohjus: `LUBATUD (Vanus ${vanus} a >= raievanus ${raievanus} a)`,
-				raievanus,
-				vanus
-			};
-		}
-
-		return {
-			lubatud: false,
-			pohjus: `EI (Raievanus ${raievanus} a, praegu ${vanus} a)`,
-			raievanus,
-			vanus
-		};
-	};
-
-	const hasFellingAgeError = data.details?.some((detail: any) => checkRaieStatus(detail).viga) || false;
 
 	const getBaseMapUrl = () => {
 		if (!data.bbox) return "";
@@ -178,17 +154,14 @@ export default function Step2Overview() {
 			return `https://kaart.maaamet.ee/wms/fotokaart?service=WMS&version=1.1.1&request=GetMap&layers=nDSM&styles=&bbox=${bboxStr}&width=1000&height=600&srs=EPSG:3301&format=image/jpeg`;
 		}
 		
-		// ESTHub Sentinel-2 reaalsed satelliitkaardid — kasutame leitud pilvitut kuupäeva kui võimalik
-		const dateParam = satCloudFreeDate ? `date=${satCloudFreeDate}&` : '';
-		
 		if (mapLayer === "NDVI") {
-			return `https://teenus.maaamet.ee/ows/wms-sentinel-2-ndvi?${dateParam}service=WMS&version=1.1.1&request=GetMap&layers=sentinel_2_ndvi&styles=&bbox=${bboxStr}&width=1000&height=600&srs=EPSG:3301&format=image/jpeg`;
+			return `https://teenus.maaamet.ee/ows/wms-sentinel-2-ndvi?service=WMS&version=1.1.1&request=GetMap&layers=sentinel_2_ndvi&styles=&bbox=${bboxStr}&width=1000&height=600&srs=EPSG:3301&format=image/jpeg`;
 		}
 		if (mapLayer === "NRG") {
-			return `https://teenus.maaamet.ee/ows/wms-sentinel-2-nrg?${dateParam}service=WMS&version=1.1.1&request=GetMap&layers=sentinel_2_nrg&styles=&bbox=${bboxStr}&width=1000&height=600&srs=EPSG:3301&format=image/jpeg`;
+			return `https://teenus.maaamet.ee/ows/wms-sentinel-2-nrg?service=WMS&version=1.1.1&request=GetMap&layers=sentinel_2_nrg&styles=&bbox=${bboxStr}&width=1000&height=600&srs=EPSG:3301&format=image/jpeg`;
 		}
 		if (mapLayer === "NDPI") {
-			return `https://teenus.maaamet.ee/ows/wms-sentinel-2-ndpi?${dateParam}service=WMS&version=1.1.1&request=GetMap&layers=sentinel_2_ndpi&styles=&bbox=${bboxStr}&width=1000&height=600&srs=EPSG:3301&format=image/jpeg`;
+			return `https://teenus.maaamet.ee/ows/wms-sentinel-2-ndpi?service=WMS&version=1.1.1&request=GetMap&layers=sentinel_2_ndpi&styles=&bbox=${bboxStr}&width=1000&height=600&srs=EPSG:3301&format=image/jpeg`;
 		}
 		
 		return "";
@@ -290,18 +263,6 @@ export default function Step2Overview() {
 					</span>
 				</div>
 
-				{hasFellingAgeError && (
-					<div className="bg-rose-50 border border-rose-200 text-rose-800 p-4 rounded-xl mb-6 flex items-start gap-3 shadow-sm animate-in fade-in duration-200">
-						<ShieldAlert size={20} className="text-rose-500 shrink-0 mt-0.5" />
-						<div className="flex-1 text-sm">
-							<p className="font-bold">Kriitiline viga andmetes!</p>
-							<p className="mt-1 text-rose-700 leading-relaxed">
-								Mõnel metsaeraldisel puudub Metsaregistri andmetes ametlik raievanus. Kuna vaikeväärtuste kasutamine pole lubatud, on edasine arvutamine peatatud.
-							</p>
-						</div>
-					</div>
-				)}
-
 				{/* Kaart - WMS pilt või Placeholder */}
 				<div className="w-full h-64 md:h-80 bg-slate-100 rounded-xl rounded-b-none border border-slate-200 border-b-0 overflow-hidden relative flex flex-col items-center justify-center bg-[url('https://www.transparenttextures.com/patterns/cartographer.png')]">
 					{data.bbox ? (
@@ -313,13 +274,14 @@ export default function Step2Overview() {
 									<img
 										src={getBaseMapUrl()}
 										alt="Metsatüki aluskaart"
-										className="absolute inset-0 w-full h-full object-cover"
+										className="absolute inset-0 w-full h-full object-fill"
 									/>
 									{/* Shape Boundary Overlay: SVG or WMS */}
 									{data.details && data.details.some((d: any) => d.geometry) ? (
 										<svg 
 											viewBox={`${data.bbox[0]} ${-data.bbox[3]} ${data.bbox[2] - data.bbox[0]} ${data.bbox[3] - data.bbox[1]}`}
 											className="absolute inset-0 w-full h-full pointer-events-none z-10"
+											preserveAspectRatio="none"
 										>
 											{data.details.map((stand: any) => {
 												if (!stand.geometry || !stand.geometry.coordinates) return null;
@@ -477,6 +439,7 @@ export default function Step2Overview() {
 									<th className="py-3 px-4">Pindala</th>
 									<th className="py-3 px-4">Peapuuliik</th>
 									<th className="py-3 px-4">Vanus</th>
+									<th className="py-3 px-4 text-center">Raietüüp</th>
 									<th className="py-3 px-4 w-12"></th>
 								</tr>
 							</thead>
@@ -487,6 +450,7 @@ export default function Step2Overview() {
 									const audit = detail.satelliteAudit;
 									const period = state.satelliteAuditPeriod;
 									const statusInfo = checkRaieStatus(detail);
+									const currentType = state.selectedEraldised[detail.eraldisId] || 'X';
 									
 									return (
 										<React.Fragment key={detail.eraldisId}>
@@ -519,6 +483,33 @@ export default function Step2Overview() {
 														) : (
 															<span className="px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider bg-red-50 text-red-600 border border-red-200 rounded shrink-0" title={statusInfo.pohjus}>Keelatud</span>
 														)}
+													</div>
+												</td>
+												<td className="py-3 px-4">
+													<div className="flex items-center justify-center">
+														<div className={`flex rounded-lg overflow-hidden border ${statusInfo.lubatud ? 'border-primary-200' : 'border-slate-200 opacity-50 pointer-events-none'}`}>
+															<button
+																onClick={(e) => { e.stopPropagation(); setSelectedEraldised({ ...state.selectedEraldised, [detail.eraldisId]: 'LR' }) }}
+																className={`px-2 py-1 text-xs font-bold transition-colors ${currentType === 'LR' ? 'bg-emerald-500 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+																title="Lageraie"
+															>
+																LR
+															</button>
+															<button
+																onClick={(e) => { e.stopPropagation(); setSelectedEraldised({ ...state.selectedEraldised, [detail.eraldisId]: 'HR' }) }}
+																className={`px-2 py-1 text-xs font-bold border-l border-r border-slate-200 transition-colors ${currentType === 'HR' ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+																title="Harvendusraie"
+															>
+																HR
+															</button>
+															<button
+																onClick={(e) => { e.stopPropagation(); setSelectedEraldised({ ...state.selectedEraldised, [detail.eraldisId]: 'X' }) }}
+																className={`px-2 py-1 text-xs font-bold transition-colors ${currentType === 'X' ? 'bg-rose-500 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+																title="Ei raiu"
+															>
+																X
+															</button>
+														</div>
 													</div>
 												</td>
 
@@ -555,6 +546,14 @@ export default function Step2Overview() {
 																		<li className="flex justify-between border-b border-slate-100 pb-1.5">
 																			<span className="text-slate-500">Keskmine kõrgus</span>
 																			<span className="font-medium text-slate-900">{m.korgus ? `${m.korgus} m` : "-"}</span>
+																		</li>
+																		<li className="flex justify-between border-b border-slate-100 pb-1.5">
+																			<span className="text-slate-500">Täius (liitus)</span>
+																			<span className="font-medium text-slate-900">{m.taius || m.liitus || "-"} %</span>
+																		</li>
+																		<li className="flex justify-between border-b border-slate-100 pb-1.5">
+																			<span className="text-slate-500">Kaitse/Piirang</span>
+																			<span className={`font-medium ${m.kaitse || m.piirang || m.kaitsekategooria ? 'text-amber-600' : 'text-slate-900'}`}>{m.kaitse || m.piirang || m.kaitsekategooria || "Puudub"}</span>
 																		</li>
 																		<li className="flex justify-between border-b border-slate-100 pb-1.5">
 																			<span className="text-slate-500">Tagavara</span>
@@ -745,10 +744,10 @@ export default function Step2Overview() {
 				</button>
 				<button
 					onClick={nextStep}
-					disabled={hasFellingAgeError}
+					disabled={!Object.values(state.selectedEraldised).some(t => t === 'LR' || t === 'HR')}
 					className="px-8 py-3 rounded-xl font-bold text-white bg-slate-900 hover:bg-emerald-700 flex items-center gap-2 transition-colors shadow-sm disabled:opacity-50 disabled:bg-slate-300 disabled:cursor-not-allowed"
 				>
-					Vali Eraldised <ArrowRight size={18} />
+					Määra Ladustamine <ArrowRight size={18} />
 				</button>
 			</div>
 		</div>

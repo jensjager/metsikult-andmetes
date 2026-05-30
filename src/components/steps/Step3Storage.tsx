@@ -9,7 +9,7 @@ interface Point {
 	y: number;
 }
 
-export default function Step4Storage() {
+export default function Step3Storage() {
 	const { state, setStorageLocation, nextStep, prevStep } = useCalculator();
 	const data = state.apiData || state.xmlData;
 
@@ -133,7 +133,10 @@ export default function Step4Storage() {
 
 	// Get all selected stands with their calculated centroids
 	const selectedStands = data.details
-		.filter((d: any) => state.selectedEraldised.includes(d.eraldisId))
+		.filter((d: any) => {
+			const t = state.selectedEraldised[d.eraldisId];
+			return t === 'LR' || t === 'HR';
+		})
 		.map((d: any) => {
 			const centroid = getCentroid(d.geometry);
 			return {
@@ -433,10 +436,10 @@ export default function Step4Storage() {
 					</span>
 				</div>
 
-				<div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+				<div className="flex flex-col gap-8">
 					
-					{/* Interactive Map Column */}
-					<div className="lg:col-span-8 flex flex-col gap-4 lg:h-full">
+					{/* Interactive Map Container */}
+					<div className="w-full flex flex-col gap-4">
 						
 						{/* Mode Toggle Controls */}
 						<div className="flex flex-wrap gap-2 items-center justify-between bg-slate-50 p-3 rounded-xl border border-slate-200">
@@ -466,7 +469,7 @@ export default function Step4Storage() {
 						</div>
 
 						{/* Map Viewport Container */}
-						<div ref={mapRef} className="relative w-full aspect-[1000/600] lg:aspect-auto lg:flex-1 lg:min-h-0 rounded-xl border border-slate-200 shadow-inner overflow-hidden select-none bg-slate-900 bg-[url('https://www.transparenttextures.com/patterns/cartographer.png')]">
+						<div ref={mapRef} className="relative w-full aspect-[1000/600] md:aspect-[16/9] rounded-xl border border-slate-200 shadow-inner overflow-hidden select-none bg-slate-900 bg-[url('https://www.transparenttextures.com/patterns/cartographer.png')]">
 							
 							{/* Floating Zoom & Pan Controls overlay (Stays fixed outside the draggable wrapper) */}
 							<div className="absolute top-4 left-4 z-20 flex flex-col gap-2 bg-white/95 backdrop-blur-sm p-2 rounded-xl shadow-lg border border-slate-200">
@@ -683,56 +686,30 @@ export default function Step4Storage() {
 							)}
 						</div>
 					</div>
-
-					{/* Settings & Details Dashboard Column */}
-					<div className="lg:col-span-4 flex flex-col gap-6">
-						
-						{/* Logistical Metrics Panel */}
-						<div className="bg-slate-50 rounded-xl p-5 border border-slate-200 shadow-inner flex flex-col gap-4">
-							<h3 className="font-bold text-slate-800 text-xs uppercase tracking-wider border-b border-slate-200 pb-2">
-								Logistika kalkulatsioon
-							</h3>
-							
-							<div className="flex flex-col gap-3">
-								<div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
-									<span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Kokkuveo kaugus metsast</span>
-									<span className="text-xl font-black text-slate-900">{formatDistanceVal(avgForwardingDistance)}</span>
-									<span className="text-[10px] text-slate-500 block mt-1">Keskmine kokkuveo vahemaa laoni</span>
-								</div>
-								
-								<div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
-									<span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Teeäärne vaheladu asub</span>
-									<span className="text-sm font-bold text-slate-800 block">
-										{landing ? `X: ${Math.round(landing.x)}, Y: ${Math.round(landing.y)}` : "Määramata"}
-									</span>
-									<span className="text-[10px] text-slate-500 block mt-1">Geograafilised L-EST97 koordinaadid teel</span>
-								</div>
-							</div>
-						</div>
-
-
-
-						{/* Info tip */}
-						<div className="bg-emerald-50 border border-emerald-200 text-emerald-950 p-4 rounded-xl text-xs flex gap-2.5 leading-relaxed">
-							<Info size={16} className="text-emerald-700 shrink-0 mt-0.5" />
-							<div>
-								<span className="font-bold block mb-1">Miks see on tähtis?</span>
-								Määrates vahelao asukoha otse sõidutee kõrvale, optimeerid forwarderi tööteed ja kindlustad veoautode lihtsa ja turvalise ligipääsu puidu pealelaadimiseks.
-							</div>
-						</div>
-
-					</div>
-
 				</div>
 
-				{/* Stand-by-stand logistics table */}
+				{/* Logistics Dashboard: Cards + Table */}
 				{landing && standsWithDistances.length > 0 && (
-					<div className="mt-8 border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
-						<div className="bg-slate-50 border-b border-slate-200 p-4">
-							<h3 className="font-bold text-slate-800 text-sm uppercase tracking-wider">
-								Eraldiste kokkuveo distantsid
-							</h3>
+					<div className="mt-4 border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
+						
+						{/* Header row with the average calculation */}
+						<div className="bg-slate-50 border-b border-slate-200 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+							<div>
+								<h3 className="font-bold text-slate-800 text-sm uppercase tracking-wider">
+									Logistika kalkulatsioon
+								</h3>
+								<p className="text-xs text-slate-500 mt-0.5">Eraldiste kokkuveo distantsid vahelaoni</p>
+							</div>
+							
+							<div className="flex items-center gap-4 bg-white px-4 py-2 rounded-lg border border-slate-200 shadow-sm">
+								<div className="flex flex-col text-right">
+									<span className="text-[10px] uppercase font-bold text-slate-400">Keskmine kokkuveo kaugus</span>
+								</div>
+								<span className="text-lg font-black text-slate-900">{formatDistanceVal(avgForwardingDistance)}</span>
+							</div>
 						</div>
+
+						{/* Stand-by-stand logistics table */}
 						<div className="overflow-x-auto">
 							<table className="w-full text-left text-sm">
 								<thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200 text-xs uppercase">

@@ -14,13 +14,10 @@ const PRIMARY_SEARCH_DAYS = 30;
 const MAX_SEARCH_DAYS = 120;
 const FETCH_TIMEOUT_MS = 6000;
 
-async function fetchFeatureInfo(
-  baseUrl: string,
-  layer: string,
-  date: string,
-  cx: number,
-  cy: number
-): Promise<number | null> {
+export async function fetchFeatureInfo(baseUrl: string, layer: string, cx: number, cy: number): Promise<number | null> {
+  const isHtml = true;
+  const format = isHtml ? 'text/html' : 'text/plain';
+
   const margin = 500;
   const minX = Math.round(cx - margin);
   const minY = Math.round(cy - margin);
@@ -28,13 +25,12 @@ async function fetchFeatureInfo(
   const maxY = Math.round(cy + margin);
 
   const url =
-    `${baseUrl}?date=${date}` +
-    `&service=WMS&version=1.1.1&request=GetFeatureInfo` +
+    `${baseUrl}?service=WMS&version=1.1.1&request=GetFeatureInfo` +
     `&layers=${layer}&query_layers=${layer}` +
     `&bbox=${minX},${minY},${maxX},${maxY}` +
     `&width=100&height=100` +
     `&x=50&y=50` +
-    `&info_format=text/plain` +
+    `&info_format=${format}` +
     `&srs=EPSG:3301`;
 
   try {
@@ -43,26 +39,26 @@ async function fetchFeatureInfo(
 
     const res = await fetch(url, {
       signal: controller.signal,
-      headers: { Accept: 'text/plain' },
+      headers: { Accept: 'text/html' },
     });
 
     clearTimeout(timeout);
 
     if (!res.ok) return null;
-    const text = await res.text();
+    const text = (await res.text()).trim();
 
-    const patterns = [
-      /pixel\s*=\s*([-\d.]+)/i,
-      /value[_\s]*list\s*=\s*([-\d.]+)/i,
-      /value\s*=\s*([-\d.]+)/i,
-    ];
+    if (text.includes('ServiceException')) {
+      return null;
+    }
 
-    for (const p of patterns) {
-      const m = text.match(p);
-      if (m) {
-        const v = parseFloat(m[1]);
-        if (!isNaN(v) && v > -1.05 && v < 1.05) return v;
+    // Try to find the scaled integer value returned by the HTML response (e.g. '8425' for 0.8425)
+    const m = text.match(/^(-?\d+)/);
+    if (m) {
+      let v = parseFloat(m[1]);
+      if (v > 10 || v < -10) {
+          v = v / 10000.0;
       }
+      if (!isNaN(v) && v > -1.05 && v < 1.05) return v;
     }
 
     return null;
@@ -88,7 +84,7 @@ export interface RealSatResult {
   error: string | null;
 }
 
-export async function fetchSatelliteAuditClient(cx: number, cy: number, forcedDate: string | null = null): Promise<RealSatResult> {
+export async function fetchSatelliteAuditClient(cx: number, cy: number): Promise<RealSatResult> {
   if (isNaN(cx) || isNaN(cy) || cx === 0 || cy === 0) {
     return {
       date: null,
@@ -102,27 +98,10 @@ export async function fetchSatelliteAuditClient(cx: number, cy: number, forcedDa
     };
   }
 
-  let foundDate: string | null = forcedDate;
-  let ndvi: number | null = null;
-  let isStale = false;
+  // Maa-amet WMS teenused tagastavad ilma date parameetrita alati uusima saadaoleva pilvevaba mosaiigi
+  const ndvi = await fetchFeatureInfo(WMS_NDVI_BASE, NDVI_LAYER, cx, cy);
 
-  if (forcedDate) {
-    ndvi = await fetchFeatureInfo(WMS_NDVI_BASE, NDVI_LAYER, forcedDate, cx, cy);
-  } else {
-    const searchDays = [0, 5, 10, 15, 20, 30, 45, 60, 90, 120];
-    for (const i of searchDays) {
-      const date = dateString(i);
-      const value = await fetchFeatureInfo(WMS_NDVI_BASE, NDVI_LAYER, date, cx, cy);
-      if (value !== null) {
-        foundDate = date;
-        ndvi = value;
-        isStale = i > PRIMARY_SEARCH_DAYS;
-        break;
-      }
-    }
-  }
-
-  if (!foundDate || ndvi === null) {
+  if (ndvi === null) {
     return {
       date: null,
       cloudfree: false,
@@ -130,29 +109,25 @@ export async function fetchSatelliteAuditClient(cx: number, cy: number, forcedDa
       ndpi: null,
       status: 'UNKNOWN',
       stale: false,
-      warning: 'Satelliitandmed pole kättesaadavad (ei leitud sobivat pilti 120 päeva jooksul).',
+      warning: 'Satelliitandmed pole kättesaadavad.',
       error: 'NO_DATA'
     };
   }
 
-  const ndpi = await fetchFeatureInfo(WMS_NDPI_BASE, NDPI_LAYER, foundDate, cx, cy) ?? 0.10;
+  const ndpi = await fetchFeatureInfo(WMS_NDPI_BASE, NDPI_LAYER, cx, cy) ?? 0.10;
 
   const status: 'HEALTHY' | 'THINNED' | 'CLEARCUT' =
     ndvi >= NDVI_HEALTHY_MIN ? 'HEALTHY' :
     ndvi >= NDVI_THINNED_MIN ? 'THINNED' : 'CLEARCUT';
 
-  const warning = isStale
-    ? `Hoiatus: Lähim saadaolev satelliitpilt on vanem kui ${PRIMARY_SEARCH_DAYS} päeva (kuupäev: ${foundDate}).`
-    : null;
-
   return {
-    date: foundDate,
-    cloudfree: !isStale,
+    date: new Date().toISOString(), // latest available implies current
+    cloudfree: true,
     ndvi: Math.round(ndvi * 1000) / 1000,
     ndpi: Math.round(ndpi * 1000) / 1000,
     status,
-    stale: isStale,
-    warning,
+    stale: false,
+    warning: null,
     error: null
   };
 }

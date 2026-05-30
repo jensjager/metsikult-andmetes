@@ -21,7 +21,7 @@ interface CalculatorState {
   katastritunnus: string;
   xmlData: ResultData | null;
   apiData: ResultData | null;
-  selectedEraldised: string[];
+  selectedEraldised: Record<string, 'LR' | 'HR' | 'X'>;
   storageLocation: any;
   costs: any;
   satelliteAuditPeriod: 'registry' | 'active';
@@ -35,7 +35,7 @@ interface CalculatorContextType {
   setKatastritunnus: (val: string) => void;
   setApiData: (data: ResultData | null) => void;
   setXmlData: (data: ResultData | null) => void;
-  setSelectedEraldised: (ids: string[]) => void;
+  setSelectedEraldised: (ids: Record<string, 'LR' | 'HR' | 'X'>) => void;
   setStorageLocation: (loc: any) => void;
   setCosts: (costs: any) => void;
   setSatelliteAuditPeriod: (period: 'registry' | 'active') => void;
@@ -47,7 +47,7 @@ const defaultState: CalculatorState = {
   katastritunnus: "",
   xmlData: null,
   apiData: null,
-  selectedEraldised: [],
+  selectedEraldised: {},
   storageLocation: null,
   costs: null,
   satelliteAuditPeriod: 'registry', // default is 'registry' to avoid mock changes, user requested lowkey UI instead
@@ -84,13 +84,13 @@ export function CalculatorProvider({ children }: { children: ReactNode }) {
   };
 
   const setStep = (step: number) => updateState({ currentStep: step });
-  const nextStep = () => updateState({ currentStep: Math.min(6, state.currentStep + 1) });
+  const nextStep = () => updateState({ currentStep: Math.min(5, state.currentStep + 1) });
   const prevStep = () => updateState({ currentStep: Math.max(1, state.currentStep - 1) });
   
   const setKatastritunnus = (val: string) => updateState({ katastritunnus: val });
   const setApiData = (data: ResultData | null) => updateState({ apiData: data, xmlData: null });
   const setXmlData = (data: ResultData | null) => updateState({ xmlData: data, apiData: null, katastritunnus: data ? data.katastritunnus : state.katastritunnus });
-  const setSelectedEraldised = (ids: string[]) => updateState({ selectedEraldised: ids });
+  const setSelectedEraldised = (ids: Record<string, 'LR' | 'HR' | 'X'>) => updateState({ selectedEraldised: ids });
   const setStorageLocation = (loc: any) => updateState({ storageLocation: loc });
   const setCosts = (costs: any) => updateState({ costs });
   const setSatelliteAuditPeriod = (period: 'registry' | 'active') => updateState({ satelliteAuditPeriod: period });

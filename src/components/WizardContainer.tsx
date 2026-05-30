@@ -3,9 +3,9 @@
 import { useCalculator } from "@/lib/CalculatorContext";
 import Step1Input from "./steps/Step1Input";
 import Step2Overview from "./steps/Step2Overview";
-import Step3Storage from "./steps/Step4Storage";
-import Step4Costs from "./steps/Step5Costs";
-import Step5Results from "./steps/Step6Results";
+import Step3Storage from "./steps/Step3Storage";
+import Step4Costs from "./steps/Step4Costs";
+import Step5Results from "./steps/Step5Results";
 import { Check } from "lucide-react";
 
 export default function WizardContainer() {
