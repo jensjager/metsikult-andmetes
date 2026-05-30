@@ -1,4 +1,4 @@
 :HL["/metsikult-andmetes/_next/static/chunks/0kuo8um~raun0.css","style"]
 :HL["/metsikult-andmetes/_next/static/media/1b99372b3eaef0c8-s.p.0gx2haw2tmll8.woff2","font",{"crossOrigin":"","type":"font/woff2"}]
 :HL["/metsikult-andmetes/_next/static/media/7ddd198311ba7843-s.p.11f_0f-25f9yg.woff2","font",{"crossOrigin":"","type":"font/woff2"}]
-0:{"tree":{"name":"","param":null,"prefetchHints":16,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":0,"slots":null}}},"staleTime":300,"buildId":"D19DLswRHxrS01ovB-sfi"}
+0:{"tree":{"name":"","param":null,"prefetchHints":16,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":0,"slots":null}}},"staleTime":300,"buildId":"ZePA9H4-kgL6SUyesKGP_"}
