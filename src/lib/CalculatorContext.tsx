@@ -25,6 +25,7 @@ interface CalculatorState {
   storageLocation: any;
   costs: any;
   satelliteAuditPeriod: 'registry' | 'active';
+  realSatData: Record<string, { status: 'HEALTHY' | 'THINNED' | 'CLEARCUT' | 'UNKNOWN'; ndvi: number | null; ndpi: number | null } | null>;
 }
 
 interface CalculatorContextType {
@@ -39,6 +40,7 @@ interface CalculatorContextType {
   setStorageLocation: (loc: any) => void;
   setCosts: (costs: any) => void;
   setSatelliteAuditPeriod: (period: 'registry' | 'active') => void;
+  setRealSatData: (data: Record<string, { status: 'HEALTHY' | 'THINNED' | 'CLEARCUT' | 'UNKNOWN'; ndvi: number | null; ndpi: number | null } | null>) => void;
   reset: () => void;
 }
 
@@ -51,6 +53,7 @@ const defaultState: CalculatorState = {
   storageLocation: null,
   costs: null,
   satelliteAuditPeriod: 'registry', // default is 'registry' to avoid mock changes, user requested lowkey UI instead
+  realSatData: {},
 };
 
 const CalculatorContext = createContext<CalculatorContextType | undefined>(undefined);
@@ -94,6 +97,7 @@ export function CalculatorProvider({ children }: { children: ReactNode }) {
   const setStorageLocation = (loc: any) => updateState({ storageLocation: loc });
   const setCosts = (costs: any) => updateState({ costs });
   const setSatelliteAuditPeriod = (period: 'registry' | 'active') => updateState({ satelliteAuditPeriod: period });
+  const setRealSatData = (data: Record<string, { status: 'HEALTHY' | 'THINNED' | 'CLEARCUT' | 'UNKNOWN'; ndvi: number | null; ndpi: number | null } | null>) => updateState({ realSatData: data });
 
   const reset = () => {
     setState(defaultState);
@@ -114,6 +118,7 @@ export function CalculatorProvider({ children }: { children: ReactNode }) {
         setStorageLocation,
         setCosts,
         setSatelliteAuditPeriod,
+        setRealSatData,
         reset,
       }}
     >

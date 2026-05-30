@@ -127,13 +127,8 @@ export default function Step5Results() {
 									Metsa seisukord satelliidilt kinnitatud!
 								</h3>
 								<p className="text-emerald-800 text-sm leading-relaxed max-w-xl font-medium">
-									ESTHub Sentinel-2 satelliidi vegetatsiooni audit skaneeris
-									metsaalad. Kõik eraldised vastavad täielikult registri
-									biomassi ootustele (klorofülli tase tervislik).
+									Kõik eraldised vastavad täielikult registri andmetele.
 								</p>
-								<span className="inline-block mt-2 text-xs font-bold text-emerald-700 bg-emerald-100/50 px-2.5 py-1 rounded-full border border-emerald-200">
-									ESTHub Taimkatte Audit • Roheline staatus (Kõik korras)
-								</span>
 							</div>
 						</div>
 					) : (
@@ -147,8 +142,6 @@ export default function Step5Results() {
 								</h3>
 								<p className="text-amber-800 text-sm leading-relaxed max-w-xl font-medium">
 									Andmed põhinevad ainult Metsaregistri ajaloolisel kirjeldusel.
-									Kuna metsa võidi vahepeal raiuda, soovitame alati seadistada
-									satelliidiaudit seire sammus.
 								</p>
 							</div>
 						</div>
@@ -163,7 +156,7 @@ export default function Step5Results() {
 							<div className="relative z-10 grid grid-cols-1 md:grid-cols-12 gap-8 items-center">
 								<div className="md:col-span-6 flex flex-col justify-center text-center md:text-left border-b md:border-b-0 md:border-r border-slate-800 pb-6 md:pb-0 md:pr-8">
 									<span className="text-emerald-400 text-xs font-bold uppercase tracking-wider mb-2 block">
-										Puidu puhasmüük (Käes)
+										Puidu puhasmüük
 									</span>
 									<h3 className="text-5xl md:text-6xl font-black text-white tracking-tight bg-clip-text">
 										{formatCurrency(costs.netValue)}
@@ -197,16 +190,6 @@ export default function Step5Results() {
 										</span>
 										<span className="text-xl font-bold text-slate-100 font-mono">
 											{costs.totalVolume.toFixed(1)} tm
-										</span>
-									</div>
-									<div className="bg-slate-800/50 p-4 rounded-xl border border-slate-800/80">
-										<span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">
-											Üldine tasuvus
-										</span>
-										<span className="text-xl font-bold text-slate-100 font-mono">
-											{costs.grossValue > 0
-												? `${((costs.netValue / costs.grossValue) * 100).toFixed(0)}%`
-												: "0%"}
 										</span>
 									</div>
 								</div>
@@ -254,7 +237,7 @@ export default function Step5Results() {
 									</tr>
 								</thead>
 								<tbody>
-									{filteredDetails.map((eraldis: any) => {
+									{filteredDetails.map((eraldis: any, index: number) => {
 										const isExpanded = expandedEraldis === eraldis.eraldisId;
 										const type = state.selectedEraldised[eraldis.eraldisId];
 										const multiplier = type === "HR" ? 0.4 : 1.0;
@@ -289,7 +272,7 @@ export default function Step5Results() {
 										}
 
 										return (
-											<React.Fragment key={eraldis.eraldisId}>
+											<React.Fragment key={`${eraldis.eraldisId}-${index}`}>
 												<tr
 													onClick={() =>
 														setExpandedEraldis(
@@ -301,7 +284,7 @@ export default function Step5Results() {
 													<td
 														className={`py-3 px-4 font-bold text-slate-800 border-l-4 transition-colors ${isExpanded ? "border-l-emerald-500" : "border-l-transparent"}`}
 													>
-														{eraldis.eraldisId}
+														{eraldis.meta?.eraldise_nr || eraldis.eraldisId}
 													</td>
 													<td className="py-3 px-4 text-slate-600">
 														{eraldis.pindala.toFixed(2)} ha
@@ -354,7 +337,12 @@ export default function Step5Results() {
 																			</h4>
 																			{Object.entries(eraldis.sortimendid).map(
 																				([liik, andmed]: [string, any]) => {
-																					const hasAnyVolume = ["palk", "peenpalk", "paberipuit", "kuttepuit"].some(
+																					const hasAnyVolume = [
+																						"palk",
+																						"peenpalk",
+																						"paberipuit",
+																						"kuttepuit",
+																					].some(
 																						(k) => (andmed[k] || 0) > 0.05,
 																					);
 																					if (!hasAnyVolume) return null;
@@ -376,63 +364,69 @@ export default function Step5Results() {
 																								</span>
 																							</div>
 																							<div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-																							{[
-																								{ name: "Palk", key: "palk" },
-																								{
-																									name: "Peenpalk",
-																									key: "peenpalk",
-																								},
-																								{
-																									name: "Paberipuit",
-																									key: "paberipuit",
-																								},
-																								{
-																									name: "Küttepuit",
-																									key: "kuttepuit",
-																								},
-																							].map((s) => {
-																								const volume =
-																									andmed[s.key] || 0;
-																								if (volume <= 0.05) return null;
-																								const pricePerTm =
-																									getOfficialPrice(
-																										liik,
-																										s.key as any,
+																								{[
+																									{ name: "Palk", key: "palk" },
+																									{
+																										name: "Peenpalk",
+																										key: "peenpalk",
+																									},
+																									{
+																										name: "Paberipuit",
+																										key: "paberipuit",
+																									},
+																									{
+																										name: "Küttepuit",
+																										key: "kuttepuit",
+																									},
+																								].map((s) => {
+																									const volume =
+																										andmed[s.key] || 0;
+																									if (volume <= 0.05)
+																										return null;
+																									const pricePerTm =
+																										getOfficialPrice(
+																											liik,
+																											s.key as any,
+																										);
+																									const value =
+																										volume * pricePerTm;
+																									return (
+																										<div
+																											key={s.key}
+																											className="flex flex-row items-center justify-between p-2.5 px-3 rounded-lg border border-slate-100 bg-slate-50 hover:bg-slate-100/70 hover:border-slate-200 transition-colors"
+																										>
+																											<div>
+																												<div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-0.5">
+																													{s.name}
+																												</div>
+																												<div className="text-sm font-black text-slate-800">
+																													{volume.toFixed(1)}{" "}
+																													<span className="text-slate-400 font-normal text-xs">
+																														tm
+																													</span>
+																												</div>
+																											</div>
+																											<div className="text-right">
+																												<div className="text-[10px] font-medium text-slate-500 mb-0.5">
+																													{pricePerTm.toFixed(
+																														2,
+																													)}{" "}
+																													€/tm
+																												</div>
+																												<div className="text-sm font-mono font-bold text-slate-700">
+																													{formatCurrency(
+																														value,
+																													)}
+																												</div>
+																											</div>
+																										</div>
 																									);
-																								const value =
-																									volume * pricePerTm;
-																								return (
-																									<div
-																										key={s.key}
-																										className="flex flex-row items-center justify-between p-2.5 px-3 rounded-lg border border-slate-100 bg-slate-50 hover:bg-slate-100/70 hover:border-slate-200 transition-colors"
-																									>
-																										<div>
-																											<div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-0.5">
-																												{s.name}
-																											</div>
-																											<div className="text-sm font-black text-slate-800">
-																												{volume.toFixed(1)}{" "}
-																												<span className="text-slate-400 font-normal text-xs">
-																													tm
-																												</span>
-																											</div>
-																										</div>
-																										<div className="text-right">
-																											<div className="text-[10px] font-medium text-slate-500 mb-0.5">
-																												{pricePerTm.toFixed(2)}{" "}
-																												€/tm
-																											</div>
-																											<div className="text-sm font-mono font-bold text-slate-700">
-																												{formatCurrency(value)}
-																											</div>
-																										</div>
-																									</div>
-																								);
-																							})}
+																								})}
+																							</div>
 																						</div>
-																					</div>
-																				);
-																			})}
+																					);
+																				},
+																			)}
 																		</div>
 																	)}
 															</div>

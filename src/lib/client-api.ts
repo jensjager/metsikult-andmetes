@@ -132,17 +132,48 @@ export async function fetchSatelliteAuditClient(cx: number, cy: number): Promise
   };
 }
 
-export async function calculateForestValueClient(katastritunnus: string, auditPeriod: 'registry' | 'active' = 'active') {
+export async function calculateForestValueClient(katastritunnus: string, auditPeriod: 'registry' | 'active' = 'active', realSatData?: Record<string, { status: 'HEALTHY' | 'THINNED' | 'CLEARCUT' | 'UNKNOWN'; ndvi: number | null; ndpi: number | null } | null>) {
   if (!katastritunnus || typeof katastritunnus !== 'string') {
     throw new Error('Katastritunnus on nõutud ja peab olema tekst formaadis (nt "21401:001:0123")');
   }
 
   // 1. Päri eraldised
-  const eraldised = await getEraldisedByKatastritunnus(katastritunnus);
+  let eraldised = await getEraldisedByKatastritunnus(katastritunnus);
 
   if (!eraldised || eraldised.length === 0) {
     throw new Error('Selle katastritunnusega ei leitud Metsaregistrist ühtegi eraldist.');
   }
+
+  // Deduplicate by katastritunnus and eraldise_nr, keeping the most recent invent_kuup
+  const eraldisedMap = new Map<string, any>();
+  for (const e of eraldised) {
+    const props = e.properties;
+    const kat = props.katastritunnus || props.katastri_nr || katastritunnus;
+    const nr = props.eraldise_nr;
+    if (!nr) {
+      // Keep items without eraldise_nr just in case
+      eraldisedMap.set(`unknown-${Math.random()}`, e);
+      continue;
+    }
+    const key = `${kat}-${nr}`;
+    const existing = eraldisedMap.get(key);
+    
+    if (!existing) {
+      eraldisedMap.set(key, e);
+    } else {
+      const existingDate = existing.properties.invent_kuup || existing.properties.inventKuup;
+      const newDate = props.invent_kuup || props.inventKuup;
+      
+      const existingTime = existingDate ? new Date(existingDate).getTime() : 0;
+      const newTime = newDate ? new Date(newDate).getTime() : 0;
+      
+      // If the new one has a more recent date, or if it has an ID that is higher (assuming incremental IDs)
+      if (newTime > existingTime || (newTime === existingTime && e.properties.id > existing.properties.id)) {
+        eraldisedMap.set(key, e);
+      }
+    }
+  }
+  eraldised = Array.from(eraldisedMap.values());
 
   // 2. Päri eraldiste elemendid (puuliigid) ühe masspäringuga
   const eraldisIds = eraldised.map(e => e.properties.id).filter(id => id !== undefined);
@@ -155,7 +186,7 @@ export async function calculateForestValueClient(katastritunnus: string, auditPe
   }
 
   // 3. Arvuta hind
-  const calculation = calculateForestValue(eraldised, auditPeriod);
+  const calculation = calculateForestValue(eraldised, auditPeriod, realSatData);
 
   // 4. Arvuta BBOX (katastritunnuse ulatus) kaardi kuvamiseks
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;

@@ -570,7 +570,7 @@ export default function Step3Storage() {
 									onTouchEnd={handleTouchEnd}
 								>
 								{/* Highlight and draw boundaries of selected stands */}
-								{selectedStands.map((stand) => {
+								{selectedStands.map((stand, index) => {
 									if (!stand.geometry || !stand.geometry.coordinates) return null;
 									
 									const rings = stand.geometry.type === "Polygon"
@@ -583,7 +583,7 @@ export default function Step3Storage() {
 
 									return (
 										<path
-											key={stand.eraldisId}
+											key={`${stand.eraldisId}-${index}`}
 											d={dStr}
 											fillRule="evenodd"
 											className="fill-emerald-500/10 stroke-emerald-500 stroke-2 hover:fill-emerald-500/35 transition-colors"
@@ -593,11 +593,11 @@ export default function Step3Storage() {
 								})}
 
 								{/* Connecting dashed lines: stand centroids to landing */}
-								{landing && selectedStands.map((stand) => {
+								{landing && selectedStands.map((stand, index) => {
 									if (!stand.centroid) return null;
 									return (
 										<line
-											key={stand.eraldisId}
+											key={`${stand.eraldisId}-${index}`}
 											x1={stand.centroid.x}
 											y1={-stand.centroid.y}
 											x2={landing.x}
@@ -612,7 +612,7 @@ export default function Step3Storage() {
 
 							{/* Absolute Positioned HTML Markers */}
 							{/* 1. Centroid badges */}
-							{selectedStands.map((stand) => {
+							{selectedStands.map((stand, index) => {
 								if (!stand.centroid) return null;
 								
 								// Calculate placement, hiding if outside zoomed bounds
@@ -621,11 +621,11 @@ export default function Step3Storage() {
 
 								return (
 									<div
-										key={stand.eraldisId}
+										key={`${stand.eraldisId}-${index}`}
 										className="absolute -translate-x-1/2 -translate-y-1/2 bg-slate-900/90 text-white font-mono font-bold text-[10px] px-1.5 py-0.5 rounded shadow border border-emerald-500/40 select-none pointer-events-none z-10"
 										style={{ left: `${pct.x}%`, top: `${pct.y}%` }}
 									>
-										{stand.eraldisId}
+										{stand.meta?.eraldise_nr || stand.eraldisId}
 									</div>
 								);
 							})}
@@ -721,10 +721,10 @@ export default function Step3Storage() {
 									</tr>
 								</thead>
 								<tbody className="divide-y divide-slate-100">
-									{standsWithDistances.map((stand) => (
-										<tr key={stand.eraldisId} className="hover:bg-slate-50">
+									{standsWithDistances.map((stand, index) => (
+										<tr key={`${stand.eraldisId}-${index}`} className="hover:bg-slate-50">
 											<td className="py-3 px-4 font-bold text-slate-900">
-												Eraldis {stand.eraldisId}
+												Eraldis {stand.meta?.eraldise_nr || stand.eraldisId}
 											</td>
 											<td className="py-3 px-4 text-slate-600">
 												{stand.pindala.toFixed(2)} ha
