@@ -56,7 +56,6 @@ export default function Step2Overview() {
 	>({});
 	const [satLoading, setSatLoading] = useState(false);
 	const [satCloudFreeDate, setSatCloudFreeDate] = useState<string | null>(null);
-	console.log(realSatData);
 	// Arvutab eraldise geomeetria (Polygon/MultiPolygon) tsentripunkti LEST koordinaatides
 	const computeCentroid = useCallback(
 		(geometry: any): { cx: number; cy: number } | null => {
@@ -146,10 +145,16 @@ export default function Step2Overview() {
 				// Recalculate forest value with real satellite data to keep Step5 in sync
 				if (state.satelliteAuditPeriod === "active") {
 					try {
-						const reqKat = state.katastritunnus || (data as any)?.katastritunnus;
+						const reqKat =
+							state.katastritunnus || (data as any)?.katastritunnus;
 						if (reqKat && reqKat !== "XML-Fail") {
-							const { calculateForestValueClient } = await import("@/lib/client-api");
-							const recalculated = await calculateForestValueClient(reqKat, "active", contextSatData);
+							const { calculateForestValueClient } =
+								await import("@/lib/client-api");
+							const recalculated = await calculateForestValueClient(
+								reqKat,
+								"active",
+								contextSatData,
+							);
 							if (state.xmlData) {
 								setXmlData(recalculated);
 							} else {
@@ -162,7 +167,15 @@ export default function Step2Overview() {
 				}
 			}
 		},
-		[computeCentroid, state.satelliteAuditPeriod, state.katastritunnus, state.xmlData, data, setApiData, setXmlData],
+		[
+			computeCentroid,
+			state.satelliteAuditPeriod,
+			state.katastritunnus,
+			state.xmlData,
+			data,
+			setApiData,
+			setXmlData,
+		],
 	);
 	const checkRaieStatus = React.useCallback((stand: any) => {
 		const m = stand.meta || {};
